@@ -1,5 +1,5 @@
 ---
-source: src/workspace.rs
+source: src/ws/mod.rs
 expression: files
 
 ---

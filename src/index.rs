@@ -3,11 +3,10 @@ use std::{
     convert::TryInto,
     ffi::OsStr,
     io::{self, Read, Write},
-    os::unix::prelude::OsStrExt,
     path::Path,
 };
 
-use crate::{locked_file, Entry, LockedFile, WithDigest};
+use crate::{locked_file, Entry, LockedFile, WithDigest, WsPath};
 use bstr::{BString, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
@@ -95,17 +94,11 @@ impl Index {
     }
 
     pub fn add(&mut self, entry: Entry) {
-        if let Some(parent) = entry.path().parent() {
-            let path = entry.path().as_os_str().as_bytes().as_bstr().to_owned();
-
-            for parent in parent.components() {
-                let key = parent.as_os_str().as_bytes().as_bstr().to_owned();
-
-                self.parents
-                    .entry(key)
-                    .or_insert_with(BTreeSet::new)
-                    .insert(path.clone());
-            }
+        for parent in entry.path().iter_parents() {
+            self.parents
+                .entry(parent)
+                .or_insert_with(BTreeSet::new)
+                .insert(entry.path().to_bstring());
         }
 
         self.discard_conflicts_with(&entry.path());
@@ -113,43 +106,35 @@ impl Index {
         self.entries.insert(entry.key().to_owned(), entry);
     }
 
-    fn discard_conflicts_with(&mut self, path: &Path) {
+    fn discard_conflicts_with(&mut self, path: &WsPath) {
         // If the new entry is lib/index/foo, remove lib and index.
-        if let Some(parents) = path.parent() {
-            for parent in parents.components() {
-                let parent = parent.as_os_str().as_bytes().as_bstr();
-                self.entries.remove(parent);
-            }
+        for parent in path.iter_parents() {
+            self.entries.remove(&parent);
         }
 
-        // If the new entry is lib, remove lib/index/foo
-        let key = path.as_os_str().as_bytes().as_bstr();
+        // If the new entry is lib, remove lib/index/foo and lib/index
+        let key = path.as_bstr();
         if let Some(conflicts) = self.parents.get(key) {
             let mut to_remove = Vec::new();
 
             for conflict in conflicts {
-                let path: &Path = OsStr::from_bytes(conflict.as_bytes()).as_ref();
-                to_remove.push(path.to_owned());
+                to_remove.push(conflict.clone());
             }
 
             for path in to_remove {
-                self.remove(&path);
+                self.remove(&WsPath::new_unchecked_bytes(path))
+                    .expect("Parents out of sync");
             }
         }
     }
 
-    fn remove(&mut self, path: &Path) -> Option<Entry> {
-        let key = path.as_os_str().as_bytes().as_bstr();
-
-        if let Some(entry) = self.entries.remove(key) {
-            if let Some(parents) = path.parent() {
-                for parent in parents.components() {
-                    let parent = parent.as_os_str().as_bytes().as_bytes().as_bstr();
-                    if let Some(children) = self.parents.get_mut(parent) {
-                        children.remove(key);
-                        if children.is_empty() {
-                            self.parents.remove(parent);
-                        }
+    fn remove(&mut self, path: &WsPath) -> Option<Entry> {
+        if let Some(entry) = self.entries.remove(path.as_bstr()) {
+            for parent in path.iter_parents() {
+                if let Some(children) = self.parents.get_mut(&parent) {
+                    children.remove(path.as_bstr());
+                    if children.is_empty() {
+                        self.parents.remove(&parent);
                     }
                 }
             }
@@ -223,7 +208,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::test_support::init;
+    use crate::{test_support::init, WsPath};
     use insta::assert_debug_snapshot;
     use pretty_assertions::assert_eq;
 
@@ -246,10 +231,10 @@ mod tests {
 
         let mut index = Index::new_virtual();
 
-        index.add(Entry::zeroed("alice.txt"));
-        index.add(Entry::zeroed("bob.txt"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
+        index.add(Entry::zeroed(WsPath::new_unchecked("bob.txt")));
 
-        index.add(Entry::zeroed("alice.txt/nested.txt"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt/nested.txt")));
 
         let actual = index
             .entries()
@@ -267,10 +252,10 @@ mod tests {
 
         let mut index = Index::new_virtual();
 
-        index.add(Entry::zeroed("alice.txt"));
-        index.add(Entry::zeroed("nested/bob.txt"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
+        index.add(Entry::zeroed(WsPath::new_unchecked("nested/bob.txt")));
 
-        index.add(Entry::zeroed("nested"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("nested")));
 
         let actual = index
             .entries()
@@ -288,11 +273,13 @@ mod tests {
 
         let mut index = Index::new_virtual();
 
-        index.add(Entry::zeroed("alice.txt"));
-        index.add(Entry::zeroed("nested/bob.txt"));
-        index.add(Entry::zeroed("nested/inner/claire.txt"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
+        index.add(Entry::zeroed(WsPath::new_unchecked("nested/bob.txt")));
+        index.add(Entry::zeroed(WsPath::new_unchecked(
+            "nested/inner/claire.txt",
+        )));
 
-        index.add(Entry::zeroed("nested"));
+        index.add(Entry::zeroed(WsPath::new_unchecked("nested")));
 
         let actual = index
             .entries()
@@ -302,23 +289,6 @@ mod tests {
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
 
         assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn TEMP() -> eyre::Result<()> {
-        init();
-
-        let expected_data = std::fs::read("test_expected.bin")?;
-        let mut expected = Index::new_virtual();
-        expected.load_from(&*expected_data)?;
-
-        let actual_data = std::fs::read("test_actual.bin")?;
-        let mut actual = Index::new_virtual();
-        actual.load_from(&*actual_data)?;
-
-        pretty_assertions::assert_eq!(expected, actual);
-
-        Ok(())
     }
 
     const SAMPLE_INDEX: &str = "\

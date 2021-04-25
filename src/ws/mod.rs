@@ -1,3 +1,6 @@
+pub mod path;
+pub use path::WsPath;
+
 use crate::Stat;
 
 use bstr::BString;
@@ -20,10 +23,11 @@ impl Workspace {
         Self { path: path.into() }
     }
 
-    pub fn find_files<P: AsRef<Path>>(
-        &self,
-        paths: Vec<P>,
-    ) -> Result<Vec<PathBuf>, FindFilesError> {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn find_files<P: AsRef<Path>>(&self, paths: Vec<P>) -> Result<Vec<WsPath>, FindFilesError> {
         let mut files = Vec::new();
 
         for rel_path in paths {
@@ -52,7 +56,7 @@ impl Workspace {
             } else if meta.is_file() {
                 debug!("Listed file {:?}", rel_path);
 
-                files.push(rel_path.into());
+                files.push(WsPath::new_unchecked(rel_path));
             } else {
                 return Err(FindFilesError::InvalidFileType(rel_path.into()));
             }
@@ -67,8 +71,8 @@ impl Workspace {
             .any(|&ignored| rel_path.as_os_str().as_bytes() == ignored)
     }
 
-    pub fn read_file<P: AsRef<Path>>(&self, path: P) -> io::Result<BString> {
-        let bytes = fs::read(self.path.join(path))?;
+    pub fn read_file(&self, path: &WsPath) -> io::Result<BString> {
+        let bytes = fs::read(path.to_absolute(self))?;
         Ok(bytes.into())
     }
 
@@ -109,7 +113,7 @@ mod tests {
         let workspace = Workspace::new(dir);
         let actual = workspace.find_files(vec!["."])?;
 
-        let expected: Vec<PathBuf> = vec!["b".into()];
+        let expected = vec![WsPath::new_unchecked("b")];
 
         assert_eq!(expected, actual);
 

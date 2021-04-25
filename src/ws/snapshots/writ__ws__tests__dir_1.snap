@@ -1,0 +1,16 @@
+---
+source: src/ws/mod.rs
+expression: files
+
+---
+[
+    WsPath(
+        "dir_1/c",
+    ),
+    WsPath(
+        "dir_1/d",
+    ),
+    WsPath(
+        "dir_1/dir_a/e",
+    ),
+]

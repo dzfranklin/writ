@@ -5,13 +5,12 @@ use std::{
     ffi::OsString,
     io,
     os::unix::ffi::{OsStrExt, OsStringExt},
-    path::{self, Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
 use crate::{
     stat::{self, Mode},
-    Oid, Stat,
+    Oid, Stat, WsPath,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -26,8 +25,7 @@ pub struct Entry {
     pub gid: u32,
     pub size: u32,
     pub flags: Flags,
-    pub path: PathBuf,
-    pub filename: BString,
+    pub path: WsPath,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -45,16 +43,8 @@ impl Entry {
     const BLOCK_SIZE: usize = 8;
     const PATH_OFFSET: usize = 62;
 
-    /// # Panics
-    /// If `path` contains a `..` component.
-    pub fn from<P: Into<PathBuf>>(path: P, oid: Oid, stat: &Stat) -> Self {
+    pub fn from(path: impl Into<WsPath>, oid: Oid, stat: &Stat) -> Self {
         let path = path.into();
-
-        if path.components().any(|c| c == path::Component::ParentDir) {
-            panic!("Cannot create entry: Unnormalized path");
-        }
-        let filename = Self::get_filename(&path);
-
         Self {
             ctime: stat.ctime(),
             mtime: stat.mtime(),
@@ -67,15 +57,12 @@ impl Entry {
             oid,
             flags: Flags::from_path(&path),
             path,
-            filename,
         }
     }
 
     #[allow(dead_code)] // Used for tests
-    pub(crate) fn zeroed(path: impl Into<PathBuf>) -> Self {
+    pub(crate) fn zeroed(path: impl Into<WsPath>) -> Self {
         let path = path.into();
-        let filename = Self::get_filename(&path);
-
         Self {
             ctime: SystemTime::UNIX_EPOCH,
             mtime: SystemTime::UNIX_EPOCH,
@@ -87,22 +74,20 @@ impl Entry {
             size: 0,
             oid: Oid::zero(),
             flags: Flags::from_path(&path),
-            path,
-            filename,
+            path: path,
         }
     }
 
     pub fn key(&self) -> &BStr {
-        self.path().as_os_str().as_bytes().as_bstr()
+        self.path().as_ref()
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &WsPath {
         &self.path
     }
 
-    /// Guaranteed not to include component ".."
     pub fn filename(&self) -> &BStr {
-        self.filename.as_bstr()
+        self.path().file_name().as_bstr()
     }
 
     pub fn mode(&self) -> stat::Mode {
@@ -129,7 +114,7 @@ impl Entry {
         writer.write_all(self.oid.as_bytes())?; // offset 60
         writer.write_u16::<NetworkEndian>(self.flags.as_u16())?; // offset 62
 
-        let path = self.path().as_os_str().as_bytes();
+        let path = self.path().as_bstr();
         writer.write_all(path)?;
         for _ in 0..Self::padding_size(path) {
             writer.write_all(b"\0")?;
@@ -177,10 +162,7 @@ impl Entry {
         for _ in 0..Self::padding_size(&path) - 1 {
             reader.read_u8()?;
         }
-        let path = OsString::from_vec(path);
-        let path = PathBuf::from(path);
-
-        let filename = Self::get_filename(&path);
+        let path = WsPath::new_unchecked_bytes(path);
 
         Ok(Self {
             oid,
@@ -194,7 +176,6 @@ impl Entry {
             size,
             flags,
             path,
-            filename,
         })
     }
 
@@ -217,17 +198,10 @@ impl Entry {
     fn systemtime_from_epoch(secs: u32, nanos: u32) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::new(u64::from(secs), nanos)
     }
-
-    fn get_filename(path: &Path) -> BString {
-        path.file_name()
-            .expect("Invalid path for index: can never end in ..")
-            .as_bytes()
-            .into()
-    }
 }
 
 impl Flags {
-    fn from_path(path: &Path) -> Self {
+    fn from_path(path: &WsPath) -> Self {
         Self {
             path_len: PathLen::from(path),
         }
@@ -255,8 +229,8 @@ impl Flags {
 impl PathLen {
     pub const MAX: usize = 0xfff;
 
-    fn from(path: &Path) -> Self {
-        let path = path.as_os_str().as_bytes();
+    fn from(path: &WsPath) -> Self {
+        let path = path.as_bstr();
         if path.len() <= Self::MAX {
             Self::Exactly(path.len())
         } else {

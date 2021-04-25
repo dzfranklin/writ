@@ -16,7 +16,7 @@ pub mod refs;
 pub mod repo;
 pub mod stat;
 pub mod with_digest;
-pub mod workspace;
+pub mod ws;
 
 pub use db::Db;
 pub use entry::Entry;
@@ -27,7 +27,8 @@ pub use refs::Refs;
 pub use repo::Repo;
 pub use stat::Stat;
 pub use with_digest::WithDigest;
-pub use workspace::Workspace;
+pub use ws::Workspace;
+pub use ws::WsPath;
 
 #[cfg(test)]
 mod test_support;

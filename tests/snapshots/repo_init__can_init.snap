@@ -1,5 +1,5 @@
 ---
-source: tests/tests.rs
+source: tests/repo_init.rs
 expression: "all_entries(dir.path().join(\".git\"))?"
 
 ---

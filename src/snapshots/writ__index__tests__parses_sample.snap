@@ -28,8 +28,9 @@ Index {
                     24,
                 ),
             },
-            path: "dir_1/dir_2/second_level",
-            filename: "second_level",
+            path: WsPath(
+                "dir_1/dir_2/second_level",
+            ),
         },
         "dir_1/dir_3/second_level": Entry {
             oid: Oid(
@@ -54,8 +55,9 @@ Index {
                     24,
                 ),
             },
-            path: "dir_1/dir_3/second_level",
-            filename: "second_level",
+            path: WsPath(
+                "dir_1/dir_3/second_level",
+            ),
         },
         "top_level": Entry {
             oid: Oid(
@@ -80,8 +82,9 @@ Index {
                     9,
                 ),
             },
-            path: "top_level",
-            filename: "top_level",
+            path: WsPath(
+                "top_level",
+            ),
         },
     },
     parents: {
@@ -89,10 +92,10 @@ Index {
             "dir_1/dir_2/second_level",
             "dir_1/dir_3/second_level",
         },
-        "dir_2": {
+        "dir_1/dir_2": {
             "dir_1/dir_2/second_level",
         },
-        "dir_3": {
+        "dir_1/dir_3": {
             "dir_1/dir_3/second_level",
         },
     },

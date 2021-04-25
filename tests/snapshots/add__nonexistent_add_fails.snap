@@ -1,5 +1,5 @@
 ---
-source: tests/tests.rs
+source: tests/add.rs
 expression: "repo.add(vec![\"random_name\"])"
 
 ---

@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{db, index, workspace, Db, Entry, Index, Object, Oid, Refs, Workspace};
+use crate::{db, index, ws, Db, Entry, Index, Object, Oid, Refs, Workspace};
 use chrono::Local;
 use eyre::eyre;
 use tracing::info;
@@ -164,7 +164,7 @@ pub enum AddError {
     /// Failed to load index
     LoadIndex(#[from] index::LoadError),
     /// Failed to find files provided in repository
-    FindFiles(#[from] workspace::FindFilesError),
+    FindFiles(#[from] ws::FindFilesError),
     /// Failed to read file
     ReadFile(#[source] io::Error),
     /// Failed to store blob
