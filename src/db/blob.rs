@@ -1,8 +1,9 @@
-use std::borrow::Cow;
+use bstr::{BString, ByteSlice};
 
-use bstr::{BStr, BString, ByteSlice};
-
-use crate::Object;
+use crate::{
+    db::{self, Db},
+    Object,
+};
 
 #[derive(Debug, Clone)]
 pub struct Blob(BString);
@@ -16,7 +17,8 @@ impl Blob {
 impl Object for Blob {
     const TYPE: &'static [u8] = b"blob";
 
-    fn serialize(&self) -> Cow<BStr> {
-        Cow::Borrowed(self.0.as_bstr())
+    fn store(&self, db: &mut Db) -> db::StoreResult {
+        let contents = self.0.as_bstr();
+        db.store::<Self>(contents)
     }
 }

@@ -1,0 +1,8 @@
+---
+source: src/workspace.rs
+expression: files
+
+---
+[
+    "a",
+]

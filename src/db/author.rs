@@ -1,6 +1,5 @@
 use bstr::BString;
 use chrono::{DateTime, Local};
-use std::fmt::Write;
 
 #[derive(Debug, Clone)]
 pub struct Author {

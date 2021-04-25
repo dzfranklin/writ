@@ -1,4 +1,15 @@
+pub mod author;
+pub mod blob;
+pub mod commit;
+pub mod tree;
+
+pub use author::Author;
+pub use blob::Blob;
+pub use commit::Commit;
+pub use tree::Tree;
+
 use crate::{Object, Oid};
+use bstr::BStr;
 use flate2::{write::ZlibEncoder, Compression};
 use tempfile::NamedTempFile;
 
@@ -9,18 +20,27 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Database {
+pub struct Db {
     path: PathBuf,
 }
 
-impl Database {
-    pub fn new<P: Into<PathBuf>>(path: P) -> Self {
-        Self { path: path.into() }
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub enum StoreError {
+    /// Failed to perform IO
+    Io(#[from] io::Error),
+}
+
+pub type StoreResult = Result<Oid, StoreError>;
+
+impl Db {
+    pub fn new<P: Into<PathBuf>>(git_dir: P) -> Self {
+        Self {
+            path: git_dir.into().join("objects"),
+        }
     }
 
-    pub fn store<O: Object>(&self, object: &O) -> io::Result<Oid> {
+    pub(crate) fn store<O: Object>(&self, content: &BStr) -> Result<Oid, StoreError> {
         let o_type = O::TYPE;
-        let content = &object.serialize();
         let size = content.len().to_string();
 
         let mut ser = Vec::with_capacity(o_type.len() + 1 + size.len() + 1 + content.len());
@@ -30,15 +50,20 @@ impl Database {
         ser.push(b'\0');
         ser.extend(content.iter());
 
-        let oid = Oid::from(&ser);
+        let oid = Oid::for_bytes(&ser);
         self.write_object(&oid, &ser)?;
         Ok(oid)
     }
 
     fn write_object(&self, oid: &Oid, content: &[u8]) -> io::Result<()> {
         let oid = oid.to_hex();
-        let path = self.path.join(&oid[0..2]);
+        let dir = self.path.join(&oid[0..2]);
         let name = &oid[2..];
+        let path = dir.join(name);
+
+        if path.exists() {
+            return Ok(());
+        }
 
         let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
         enc.write_all(content)?;
@@ -48,11 +73,10 @@ impl Database {
         let mut temp = NamedTempFile::new()?;
         temp.write_all(&content)?;
 
-        let target = path.join(name);
-        match fs::rename(temp.path(), &target) {
+        match fs::rename(temp.path(), &path) {
             Err(err) if err.kind() == ErrorKind::NotFound => {
-                fs::create_dir(&path)?;
-                fs::rename(temp.path(), &target)?;
+                fs::create_dir(&dir)?;
+                fs::rename(temp.path(), &path)?;
             }
             Err(err) => return Err(err),
             Ok(()) => (),

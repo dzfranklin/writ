@@ -1,0 +1,12 @@
+---
+source: src/workspace.rs
+expression: files
+
+---
+[
+    "a",
+    "b",
+    "dir_1/c",
+    "dir_1/d",
+    "dir_1/dir_a/e",
+]

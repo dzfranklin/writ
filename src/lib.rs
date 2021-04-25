@@ -1,4 +1,4 @@
-#![feature(path_try_exists)]
+#![feature(path_try_exists, with_options)]
 // TODO: Warn clippy::cargos
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
@@ -7,21 +7,28 @@
     clippy::must_use_candidate
 )]
 
-pub mod author;
-pub mod blob;
-pub mod commit;
-pub mod database;
+pub mod db;
+pub mod entry;
+pub mod index;
+pub mod locked_file;
 pub mod object;
-pub mod tree;
+pub mod refs;
+pub mod stat;
+pub mod with_digest;
 pub mod workspace;
 
-use author::Author;
-use blob::Blob;
-use commit::Commit;
-use database::Database;
-use object::{Object, Oid};
-use tree::Tree;
-use workspace::Workspace;
+pub use db::Db;
+pub use entry::Entry;
+pub use index::Index;
+pub use locked_file::LockedFile;
+pub use object::{Object, Oid};
+pub use refs::Refs;
+pub use stat::Stat;
+pub use with_digest::WithDigest;
+pub use workspace::Workspace;
+
+#[cfg(test)]
+mod test_support;
 
 #[allow(unused)]
 use tracing::{debug, error, info, instrument, span, warn};
@@ -29,8 +36,7 @@ use tracing::{debug, error, info, instrument, span, warn};
 use anyhow::{anyhow, Context};
 use chrono::Local;
 use std::{
-    env, fs,
-    io::{self, Write},
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -51,45 +57,64 @@ pub fn init<P: AsRef<Path>>(dir: P) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn commit(name: String, email: String, mut msg: String) -> anyhow::Result<()> {
+pub fn commit<P: AsRef<Path>>(
+    root_path: P,
+    name: String,
+    email: String,
+    mut msg: String,
+) -> anyhow::Result<()> {
     if msg.is_empty() {
         return Err(anyhow!("Empty commit message"));
     }
-    if !msg.ends_with("\n") {
+    if !msg.ends_with('\n') {
         msg.push('\n');
     }
 
-    let root_path = env::current_dir()?;
+    let root_path = root_path.as_ref();
     let git_path = root_path.join(".git");
-    let db_path = git_path.join("objects");
 
-    let workspace = Workspace::new(root_path);
-    let db = Database::new(db_path);
+    let mut db = Db::new(&git_path);
+    let index = Index::load(&git_path)?;
+    let refs = Refs::new(&git_path);
 
-    let entries = workspace
-        .list_files()?
-        .into_iter()
-        .map(|path| {
-            let data = workspace.read_file(&path)?;
-            let blob = Blob::new(data);
-            let oid = db.store(&blob).context("Failed to store object")?;
+    let entries: Vec<_> = index.entries().map(Clone::clone).collect();
 
-            Ok(tree::Entry::new(path, oid))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let root = db::Tree::from(entries);
+    let root_oid = root.store(&mut db)?;
 
-    let tree = Tree::new(entries);
-    let tree_oid = db.store(&tree)?;
-
-    let author = Author::new(name, email, Local::now());
-    let commit = Commit::new(tree_oid, author, msg.clone());
-    let commit_oid = db.store(&commit)?;
+    let parent = refs.read_head()?.map(Oid::parse).transpose()?;
+    let author = db::Author::new(name, email, Local::now());
+    let commit = db::Commit::new(parent, root_oid, author, msg.clone());
+    let commit_oid = commit.store(&mut db)?;
+    refs.update_head(&commit_oid)?;
 
     info!(oid=?commit_oid, ?msg, "Commit");
 
-    let head = git_path.join("HEAD");
-    let mut head = fs::File::create(head)?;
-    head.write_all(commit_oid.to_hex().as_bytes())?;
+    Ok(())
+}
+
+pub fn add<R, P>(root_path: R, files: Vec<P>) -> anyhow::Result<()>
+where
+    R: AsRef<Path>,
+    P: AsRef<Path>,
+{
+    let root_path = root_path.as_ref();
+    let git_path = root_path.join(".git");
+
+    let workspace = Workspace::new(&root_path);
+    let mut db = Db::new(&git_path);
+    let mut index = Index::load(&git_path)?;
+
+    for file in workspace.find_files(files)? {
+        let data = workspace.read_file(&file)?;
+        let stat = workspace.stat(&file)?;
+
+        let blob = db::Blob::new(data);
+        let oid = blob.store(&mut db)?;
+        index.add(Entry::from(file, oid, &stat));
+    }
+
+    index.commit()?;
 
     Ok(())
 }

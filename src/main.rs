@@ -1,32 +1,17 @@
-use std::{
-    io::{self, Read},
-    path::PathBuf,
-};
+use std::{env, path::PathBuf};
 
 use structopt::StructOpt;
+use tracing::debug;
 use writ::*;
-
-fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .pretty()
-        .init();
-
-    match Opt::from_args() {
-        Opt::Init { dir } => init(dir),
-        Opt::Commit {
-            name,
-            email,
-            message,
-        } => commit(name, email, message),
-    }
-}
 
 #[derive(StructOpt, Debug, Clone)]
 pub enum Opt {
     Init {
         #[structopt(default_value = ".")]
         dir: PathBuf,
+    },
+    Add {
+        files: Vec<PathBuf>,
     },
     Commit {
         #[structopt(long)]
@@ -36,4 +21,25 @@ pub enum Opt {
         #[structopt(long, short)]
         message: String,
     },
+}
+
+fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .pretty()
+        .init();
+
+    let opt = Opt::from_args();
+
+    debug!("Parsed opt {:#?}", opt);
+
+    match opt {
+        Opt::Init { dir } => init(dir),
+        Opt::Add { files } => add(env::current_dir()?, files),
+        Opt::Commit {
+            name,
+            email,
+            message,
+        } => commit(env::current_dir()?, name, email, message),
+    }
 }
