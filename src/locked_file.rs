@@ -10,9 +10,9 @@ pub enum Error {
     /// Error performing IO
     Io(#[from] io::Error),
     /// Failed to acquire lock
-    Contested,
+    Contested(#[source] io::Error),
     /// File does not exist
-    NotFound,
+    NotFound(#[source] io::Error),
 }
 
 #[derive(Debug)]
@@ -38,8 +38,8 @@ impl LockedFile {
             Ok(lock) => lock,
             Err(err) => {
                 return match err.kind() {
-                    io::ErrorKind::AlreadyExists => Err(Error::Contested),
-                    io::ErrorKind::NotFound => Err(Error::NotFound),
+                    io::ErrorKind::AlreadyExists => Err(Error::Contested(err)),
+                    io::ErrorKind::NotFound => Err(Error::NotFound(err)),
                     _ => Err(Error::Io(err)),
                 }
             }
@@ -48,7 +48,7 @@ impl LockedFile {
         let protected = match fs::File::open(&path) {
             Ok(protected) => Ok(Some(protected)),
             Err(err) => match err.kind() {
-                io::ErrorKind::AlreadyExists => Err(Error::Contested),
+                io::ErrorKind::AlreadyExists => Err(Error::Contested(err)),
                 io::ErrorKind::NotFound => Ok(None),
                 _ => Err(Error::Io(err)),
             },
@@ -82,11 +82,11 @@ impl LockedFile {
         Ok(())
     }
 
-    pub fn cancel(mut self) -> io::Result<()> {
-        self._cancel()
+    pub fn rollback(mut self) -> io::Result<()> {
+        self._rollback()
     }
 
-    fn _cancel(&mut self) -> io::Result<()> {
+    fn _rollback(&mut self) -> io::Result<()> {
         let lock = self.lock.take().unwrap();
         drop(lock);
         fs::remove_file(&self.lock_path)
@@ -111,7 +111,7 @@ impl Drop for LockedFile {
     fn drop(&mut self) {
         if self.lock.is_some() {
             warn!(path=?self.path, "LockedFile never committed, cancelling");
-            if let Err(err) = self._cancel() {
+            if let Err(err) = self._rollback() {
                 error!("Failed to remove lock: {:?}", err);
             }
         }

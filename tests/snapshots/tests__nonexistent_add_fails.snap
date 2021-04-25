@@ -1,0 +1,16 @@
+---
+source: tests/tests.rs
+expression: "repo.add(vec![\"random_name\"])"
+
+---
+Err(
+    FindFiles(
+        Io(
+            Os {
+                code: 2,
+                kind: NotFound,
+                message: "No such file or directory",
+            },
+        ),
+    ),
+)

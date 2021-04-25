@@ -9,7 +9,8 @@ use cmd_lib::run_fun;
 use insta::assert_debug_snapshot;
 use pretty_assertions::assert_eq;
 use std::fs;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
+use writ::Repo;
 
 static INIT: Once = Once::new();
 
@@ -102,11 +103,16 @@ macro_rules! hex_assert_eq {
     }};
 }
 
+fn repo_fixture() -> eyre::Result<(TempDir, Repo)> {
+    let dir = tempdir()?;
+    let repo = Repo::init(dir.path())?;
+    Ok((dir, repo))
+}
+
 #[test]
 fn can_init() -> Result {
     init();
-    let dir = tempdir()?;
-    writ::init(dir.path())?;
+    let (dir, repo) = repo_fixture()?;
     assert_debug_snapshot!(all_entries(dir.path().join(".git"))?);
 
     Ok(())
@@ -121,13 +127,12 @@ fn can_basic_commit() -> Result {
 
     let msg = "Message";
 
-    let actual = tempdir()?;
+    let (actual, repo) = repo_fixture()?;
     let actual = actual.path();
-    writ::init(actual)?;
-    fs::write(actual.join("file.txt"), "File contents\n")?;
-    writ::add(actual, vec!["file.txt"])?;
 
-    writ::commit(actual, NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
+    fs::write(actual.join("file.txt"), "File contents\n")?;
+    repo.add(vec!["file.txt"])?;
+    repo.commit(NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
 
     let expected = tempdir()?;
     let expected = expected.path();
@@ -159,13 +164,12 @@ fn can_commit_with_nested_files() -> Result {
 
     let msg = "Message";
 
-    let actual = tempdir()?;
+    let (actual, repo) = repo_fixture()?;
     let actual = actual.path();
-    writ::init(actual)?;
     create_nested_files(actual)?;
-    writ::add(actual, vec!["."])?;
+    repo.add(vec!["."])?;
 
-    writ::commit(actual, NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
+    repo.commit(NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
 
     let expected = tempdir()?;
     let expected = expected.path();
@@ -195,14 +199,13 @@ fn can_commit_with_nested_files() -> Result {
 fn can_basic_add() -> Result {
     init();
 
-    let dir_handle = tempdir()?;
+    let (dir_handle, repo) = repo_fixture()?;
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    writ::init(dir)?;
     fs::write(dir.join("random_name"), b"some contents")?;
 
-    writ::add(dir, vec!["random_name"])?;
+    repo.add(vec!["random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
@@ -227,15 +230,14 @@ fn can_basic_add() -> Result {
 fn can_nested_add() -> Result {
     init();
 
-    let dir_handle = tempdir()?;
+    let (dir_handle, repo) = repo_fixture()?;
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    writ::init(dir)?;
     create_nested_files(dir)?;
 
     let files = all_files(&dir)?;
-    writ::add(dir, files)?;
+    repo.add(files)?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
@@ -261,15 +263,14 @@ fn can_nested_add() -> Result {
 fn can_duplicate_add() -> Result {
     init();
 
-    let dir_handle = tempdir()?;
+    let (dir_handle, repo) = repo_fixture()?;
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    writ::init(dir)?;
     fs::write(dir.join("random_name"), b"some contents")?;
 
-    writ::add(dir, vec!["random_name", "random_name"])?;
-    writ::add(dir, vec!["random_name"])?;
+    repo.add(vec!["random_name", "random_name"])?;
+    repo.add(vec!["random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
@@ -295,11 +296,10 @@ fn can_duplicate_add() -> Result {
 fn nonexistent_add_fails() -> Result {
     init();
 
-    let dir_handle = tempdir()?;
+    let (dir_handle, repo) = repo_fixture()?;
     let dir = dir_handle.path();
 
-    writ::init(dir)?;
-    assert!(writ::add(dir, vec!["random_name"]).is_err());
+    assert_debug_snapshot!(repo.add(vec!["random_name"]));
 
     Ok(())
 }
@@ -308,16 +308,15 @@ fn nonexistent_add_fails() -> Result {
 fn can_add_multiple_times() -> Result {
     init();
 
-    let dir_handle = tempdir()?;
+    let (dir_handle, repo) = repo_fixture()?;
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    writ::init(dir)?;
     fs::write(dir.join("random_name"), b"some contents")?;
     fs::write(dir.join("random_name_2"), b"some contents")?;
 
-    writ::add(dir, vec!["random_name", "random_name"])?;
-    writ::add(dir, vec!["random_name_2", "random_name"])?;
+    repo.add(vec!["random_name", "random_name"])?;
+    repo.add(vec!["random_name_2", "random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept

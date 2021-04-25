@@ -36,12 +36,16 @@ fn main() -> eyre::Result<()> {
     debug!("Parsed opt {:#?}", opt);
 
     match opt {
-        Opt::Init { dir } => init(dir),
-        Opt::Add { files } => add(env::current_dir()?, files),
+        Opt::Init { dir } => {
+            Repo::init(dir)?;
+        }
+        Opt::Add { files } => Repo::for_current_dir()?.add(files)?,
         Opt::Commit {
             name,
             email,
             message,
-        } => commit(env::current_dir()?, name, email, message),
+        } => Repo::for_current_dir()?.commit(name, email, message)?,
     }
+
+    Ok(())
 }

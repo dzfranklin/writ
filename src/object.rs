@@ -19,7 +19,7 @@ impl Oid {
         Ok(Oid::new(oid))
     }
 
-    pub fn new(bytes: [u8; Oid::SIZE]) -> Self {
+    pub const fn new(bytes: [u8; Oid::SIZE]) -> Self {
         Oid(bytes)
     }
 
@@ -29,7 +29,11 @@ impl Oid {
         Self(hash)
     }
 
-    pub fn as_bytes(&self) -> &[u8; Oid::SIZE] {
+    pub const fn zero() -> Self {
+        Self::new([0; Self::SIZE])
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; Oid::SIZE] {
         &self.0
     }
 

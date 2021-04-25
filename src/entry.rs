@@ -71,6 +71,26 @@ impl Entry {
         }
     }
 
+    pub(crate) fn zeroed(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let filename = Self::get_filename(&path);
+
+        Self {
+            ctime: SystemTime::UNIX_EPOCH,
+            mtime: SystemTime::UNIX_EPOCH,
+            dev: 0,
+            ino: 0,
+            mode: Mode::Regular,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: Oid::zero(),
+            flags: Flags::from_path(&path),
+            path,
+            filename,
+        }
+    }
+
     pub fn key(&self) -> &BStr {
         self.path().as_os_str().as_bytes().as_bstr()
     }
