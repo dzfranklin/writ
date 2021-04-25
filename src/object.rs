@@ -4,7 +4,7 @@ use crate::{db, Db};
 use bstr::BStr;
 use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY as SHA1};
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Oid([u8; Oid::SIZE]);
 
 impl Oid {

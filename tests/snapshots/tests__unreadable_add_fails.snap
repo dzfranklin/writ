@@ -1,0 +1,14 @@
+---
+source: tests/tests.rs
+expression: "repo.add(vec![\"random_name\"])"
+
+---
+Err(
+    ReadFile(
+        Os {
+            code: 13,
+            kind: PermissionDenied,
+            message: "Permission denied",
+        },
+    ),
+)

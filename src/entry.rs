@@ -14,7 +14,7 @@ use crate::{
     Oid, Stat,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Entry {
     pub oid: Oid,
     pub ctime: SystemTime,
@@ -30,12 +30,12 @@ pub struct Entry {
     pub filename: BString,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Flags {
     path_len: PathLen,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum PathLen {
     Exactly(usize),
     MaxOrGreater,

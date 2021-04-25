@@ -27,6 +27,7 @@ tempfile = "3.2.0"
 cmd_lib = "1.0.10"
 pretty_assertions = "0.7.2"
 hexdump = "0.1.1"
+filetime = "0.2.14"
 
 # For color-eyre, see <https://github.com/yaahc/color-eyre#improving-perf-on-debug-builds>
 [profile.dev.package.backtrace]

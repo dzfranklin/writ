@@ -1,0 +1,18 @@
+---
+source: tests/tests.rs
+expression: "repo.add(vec![\"random_name\"])"
+
+---
+Err(
+    LoadIndex(
+        Locking(
+            Contested(
+                Os {
+                    code: 17,
+                    kind: AlreadyExists,
+                    message: "File exists",
+                },
+            ),
+        ),
+    ),
+)

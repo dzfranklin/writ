@@ -3,7 +3,7 @@ use std::{fs, os::linux::fs::MetadataExt, os::unix::fs::PermissionsExt, time::Sy
 use bstr::{BStr, ByteSlice};
 use tracing::warn;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Mode {
     Regular,
     Executable,

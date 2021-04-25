@@ -1,4 +1,4 @@
-#![feature(assert_matches)]
+#![feature(assert_matches, path_try_exists)]
 
 use std::{
     path::{Path, PathBuf},
@@ -78,27 +78,38 @@ fn create_nested_files(dir: &Path) -> Result {
     fs::create_dir_all(dir.join("dir_1/dir_a/dir_y"))?;
     fs::create_dir_all(dir.join("dir_2/dir_a/dir_x"))?;
 
-    fs::write(dir.join("f"), "in /")?;
-    fs::write(dir.join("dir_1/f"), "in /1 #1")?;
-    fs::write(dir.join("dir_1/f2"), "in /1 #2")?;
-    fs::write(dir.join("dir_1/dir_a/f"), "in /1/a")?;
-    fs::write(dir.join("dir_1/dir_a/dir_x/f"), "in /1/a/x")?;
-    fs::write(dir.join("dir_1/dir_a/dir_y/f"), "in /1/a/y")?;
-    fs::write(dir.join("dir_2/dir_a/dir_x/f"), "in /2/a/x")?;
+    write_normalized(dir.join("f"), "in /")?;
+    write_normalized(dir.join("dir_1/f"), "in /1 #1")?;
+    write_normalized(dir.join("dir_1/f2"), "in /1 #2")?;
+    write_normalized(dir.join("dir_1/dir_a/f"), "in /1/a")?;
+    write_normalized(dir.join("dir_1/dir_a/dir_x/f"), "in /1/a/x")?;
+    write_normalized(dir.join("dir_1/dir_a/dir_y/f"), "in /1/a/y")?;
+    write_normalized(dir.join("dir_2/dir_a/dir_x/f"), "in /2/a/x")?;
 
     Ok(())
 }
 
 macro_rules! hex_assert_eq {
     ($expected:expr, $actual:expr) => {{
-        if $expected != $actual {
-            let expected = hexdump::hexdump_iter(&*$expected)
+        let expected = $expected;
+        let actual = $actual;
+
+        if expected != actual {
+            let expected_dump = hexdump::hexdump_iter(expected.as_ref())
                 .map(|l| format!("{}", l))
                 .collect::<Vec<_>>();
-            let actual = hexdump::hexdump_iter(&*$actual)
+            let actual_dump = hexdump::hexdump_iter(actual.as_ref())
                 .map(|l| format!("{}", l))
                 .collect::<Vec<_>>();
-            assert_eq!(expected, actual);
+
+            fs::write("test_expected.bin", expected)
+                .expect("Test failed, error trying to write binary output to fs for debugging");
+            fs::write("test_actual.bin", actual)
+                .expect("Test failed, error trying to write binary output to fs for debugging");
+
+            eprintln!("Wrote test_expected.bin and test_actual.bin to workspace");
+
+            assert_eq!(expected_dump, actual_dump);
         }
     }};
 }
@@ -107,6 +118,16 @@ fn repo_fixture() -> eyre::Result<(TempDir, Repo)> {
     let dir = tempdir()?;
     let repo = Repo::init(dir.path())?;
     Ok((dir, repo))
+}
+
+fn write_normalized(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> Result {
+    fs::write(path.as_ref(), data)?;
+    filetime::set_file_times(
+        path,
+        filetime::FileTime::from_unix_time(1042, 12),
+        filetime::FileTime::from_unix_time(1042, 13),
+    )?;
+    Ok(())
 }
 
 #[test]
@@ -130,14 +151,14 @@ fn can_basic_commit() -> Result {
     let (actual, repo) = repo_fixture()?;
     let actual = actual.path();
 
-    fs::write(actual.join("file.txt"), "File contents\n")?;
+    write_normalized(actual.join("file.txt"), "File contents\n")?;
     repo.add(vec!["file.txt"])?;
     repo.commit(NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
 
     let expected = tempdir()?;
     let expected = expected.path();
     let expected_s = expected.to_str().unwrap();
-    fs::write(expected.join("file.txt"), "File contents\n")?;
+    write_normalized(expected.join("file.txt"), "File contents\n")?;
     (run_fun! {
         cd $expected_s;
         git init;
@@ -203,13 +224,13 @@ fn can_basic_add() -> Result {
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    fs::write(dir.join("random_name"), b"some contents")?;
+    write_normalized(dir.join("random_name"), b"some contents")?;
 
     repo.add(vec!["random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
-    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+    write_normalized(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
 
     (run_fun! {
         cd $dir_s;
@@ -234,7 +255,7 @@ fn can_add_executable() -> Result {
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    fs::write(dir.join("random_name"), b"some contents")?;
+    write_normalized(dir.join("random_name"), b"some contents")?;
     (run_fun! {
         cd $dir_s;
         chmod +x random_name;
@@ -244,7 +265,7 @@ fn can_add_executable() -> Result {
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
-    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+    write_normalized(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
 
     (run_fun! {
         cd $dir_s;
@@ -253,8 +274,6 @@ fn can_add_executable() -> Result {
     })?;
 
     let expected = fs::read(dir.join(".git/index"))?;
-
-    std::mem::forget(dir_handle);
 
     hex_assert_eq!(expected, actual);
 
@@ -276,7 +295,7 @@ fn can_nested_add() -> Result {
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
-    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+    write_normalized(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
     (run_fun! {
         cd $dir_s;
         rm .git/index;
@@ -302,14 +321,14 @@ fn can_duplicate_add() -> Result {
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    fs::write(dir.join("random_name"), b"some contents")?;
+    write_normalized(dir.join("random_name"), b"some contents")?;
 
     repo.add(vec!["random_name", "random_name"])?;
     repo.add(vec!["random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
-    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+    write_normalized(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
     (run_fun! {
         cd $dir_s;
         rm .git/index;
@@ -330,11 +349,54 @@ fn can_duplicate_add() -> Result {
 #[test]
 fn nonexistent_add_fails() -> Result {
     init();
-
-    let (dir_handle, repo) = repo_fixture()?;
-    let _dir = dir_handle.path();
+    let (_dir, repo) = repo_fixture()?;
 
     assert_debug_snapshot!(repo.add(vec!["random_name"]));
+
+    Ok(())
+}
+
+#[test]
+fn unreadable_add_fails() -> Result {
+    init();
+
+    let (dir_handle, repo) = repo_fixture()?;
+    let dir = dir_handle.path();
+    let dir_s = dir.to_str().unwrap();
+    write_normalized(dir.join("random_name"), b"some contents")?;
+    (run_fun! {
+        cd $dir_s;
+        chmod -r random_name;
+    })?;
+
+    assert_debug_snapshot!(repo.add(vec!["random_name"]));
+
+    Ok(())
+}
+
+#[test]
+fn add_fails_if_index_locked() -> Result {
+    init();
+
+    let (dir_handle, repo) = repo_fixture()?;
+    let dir = dir_handle.path();
+    write_normalized(dir.join("random_name"), b"some contents")?;
+    write_normalized(dir.join(".git/index.lock"), b"")?;
+
+    assert_debug_snapshot!(repo.add(vec!["random_name"]));
+
+    Ok(())
+}
+
+#[test]
+fn index_not_locked_after_failed_add() -> Result {
+    init();
+
+    let (dir_handle, repo) = repo_fixture()?;
+    let dir = dir_handle.path();
+    assert!(repo.add(vec!["nonexistent"]).is_err());
+
+    assert!(!dir.join(".git/index.lock").try_exists()?);
 
     Ok(())
 }
@@ -347,15 +409,15 @@ fn can_add_multiple_times() -> Result {
     let dir = dir_handle.path();
     let dir_s = dir.to_str().unwrap();
 
-    fs::write(dir.join("random_name"), b"some contents")?;
-    fs::write(dir.join("random_name_2"), b"some contents")?;
+    write_normalized(dir.join("random_name"), b"some contents")?;
+    write_normalized(dir.join("random_name_2"), b"some contents")?;
 
     repo.add(vec!["random_name", "random_name"])?;
     repo.add(vec!["random_name_2", "random_name"])?;
     let actual = fs::read(dir.join(".git/index"))?;
 
     // Needed for git to accept
-    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+    write_normalized(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
     (run_fun! {
         cd $dir_s;
         rm .git/index;

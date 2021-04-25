@@ -184,6 +184,14 @@ impl Index {
     }
 }
 
+impl Eq for Index {}
+
+impl PartialEq for Index {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries().eq(other.entries())
+    }
+}
+
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
 /// Failed to load index
 pub enum LoadError {
@@ -294,6 +302,23 @@ mod tests {
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
 
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn TEMP() -> eyre::Result<()> {
+        init();
+
+        let expected_data = std::fs::read("test_expected.bin")?;
+        let mut expected = Index::new_virtual();
+        expected.load_from(&*expected_data)?;
+
+        let actual_data = std::fs::read("test_actual.bin")?;
+        let mut actual = Index::new_virtual();
+        actual.load_from(&*actual_data)?;
+
+        pretty_assertions::assert_eq!(expected, actual);
+
+        Ok(())
     }
 
     const SAMPLE_INDEX: &str = "\
