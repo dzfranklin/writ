@@ -112,7 +112,7 @@ fn repo_fixture() -> eyre::Result<(TempDir, Repo)> {
 #[test]
 fn can_init() -> Result {
     init();
-    let (dir, repo) = repo_fixture()?;
+    let (dir, _repo) = repo_fixture()?;
     assert_debug_snapshot!(all_entries(dir.path().join(".git"))?);
 
     Ok(())
@@ -332,7 +332,7 @@ fn nonexistent_add_fails() -> Result {
     init();
 
     let (dir_handle, repo) = repo_fixture()?;
-    let dir = dir_handle.path();
+    let _dir = dir_handle.path();
 
     assert_debug_snapshot!(repo.add(vec!["random_name"]));
 

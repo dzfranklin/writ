@@ -2,7 +2,7 @@ use bstr::{BStr, BString, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use std::{
     convert::TryInto,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     io,
     os::unix::ffi::{OsStrExt, OsStringExt},
     path::{self, Path, PathBuf},
@@ -71,6 +71,7 @@ impl Entry {
         }
     }
 
+    #[allow(dead_code)] // Used for tests
     pub(crate) fn zeroed(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let filename = Self::get_filename(&path);

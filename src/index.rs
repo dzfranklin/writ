@@ -1,13 +1,13 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     convert::TryInto,
     ffi::OsStr,
     io::{self, Read, Write},
     os::unix::prelude::OsStrExt,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
-use crate::{db::Commit, locked_file, Entry, LockedFile, WithDigest};
+use crate::{locked_file, Entry, LockedFile, WithDigest};
 use bstr::{BString, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
@@ -45,6 +45,7 @@ impl Index {
     }
 
     /// Committing a virtual `Index` will panic.
+    #[allow(dead_code)] // Used for tests
     pub(crate) fn new_virtual() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -211,6 +212,8 @@ pub enum CorruptError {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::test_support::init;
     use insta::assert_debug_snapshot;
