@@ -72,6 +72,7 @@ impl Db {
         // We use a temp file to get an atomic write
         let mut temp = NamedTempFile::new()?;
         temp.write_all(&content)?;
+        temp.flush()?;
 
         match fs::rename(temp.path(), &path) {
             Err(err) if err.kind() == ErrorKind::NotFound => {
