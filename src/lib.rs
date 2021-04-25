@@ -33,19 +33,19 @@ mod test_support;
 #[allow(unused)]
 use tracing::{debug, error, info, instrument, span, warn};
 
-use anyhow::{anyhow, Context};
 use chrono::Local;
+use eyre::{eyre, Context};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-pub fn init<P: AsRef<Path>>(dir: P) -> anyhow::Result<()> {
+pub fn init<P: AsRef<Path>>(dir: P) -> eyre::Result<()> {
     let root_path = normalize_path(dir.as_ref());
     let git_path = root_path.join(".git");
 
     if git_path.try_exists()? {
-        return Err(anyhow!("{:?} already exists", git_path));
+        return Err(eyre!("{:?} already exists", git_path));
     }
 
     for dir in &["objects", "refs"] {
@@ -62,9 +62,9 @@ pub fn commit<P: AsRef<Path>>(
     name: String,
     email: String,
     mut msg: String,
-) -> anyhow::Result<()> {
+) -> eyre::Result<()> {
     if msg.is_empty() {
-        return Err(anyhow!("Empty commit message"));
+        return Err(eyre!("Empty commit message"));
     }
     if !msg.ends_with('\n') {
         msg.push('\n');
@@ -93,7 +93,7 @@ pub fn commit<P: AsRef<Path>>(
     Ok(())
 }
 
-pub fn add<R, P>(root_path: R, files: Vec<P>) -> anyhow::Result<()>
+pub fn add<R, P>(root_path: R, files: Vec<P>) -> eyre::Result<()>
 where
     R: AsRef<Path>,
     P: AsRef<Path>,

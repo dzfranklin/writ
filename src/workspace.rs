@@ -90,14 +90,14 @@ pub enum FindFilesError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::init_logs;
+    use crate::test_support::init;
     use insta::assert_debug_snapshot;
     use pretty_assertions::assert_eq;
     use tempfile::tempdir;
 
     #[test]
-    fn excludes_git_dir() -> anyhow::Result<()> {
-        init_logs();
+    fn excludes_git_dir() -> eyre::Result<()> {
+        init();
 
         let dir = tempdir()?;
         let dir = dir.path();
@@ -117,8 +117,8 @@ mod tests {
     }
 
     #[test]
-    fn find_files() -> anyhow::Result<()> {
-        init_logs();
+    fn find_files() -> eyre::Result<()> {
+        init();
 
         let dir = tempdir()?;
         let dir = dir.path();

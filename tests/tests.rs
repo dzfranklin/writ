@@ -1,6 +1,9 @@
 #![feature(assert_matches)]
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Once,
+};
 
 use cmd_lib::run_fun;
 use insta::assert_debug_snapshot;
@@ -8,17 +11,23 @@ use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::tempdir;
 
-fn init_logs() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .pretty()
-        .try_init();
+static INIT: Once = Once::new();
+
+fn init() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .pretty()
+            .init();
+
+        color_eyre::install().unwrap();
+    });
 }
 
-type Result = anyhow::Result<()>;
+type Result = eyre::Result<()>;
 
-fn _all_entries<D: Into<PathBuf>>(dir: D, include_dirs: bool) -> anyhow::Result<Vec<String>> {
-    fn helper(dir: PathBuf, include_dirs: bool) -> anyhow::Result<Vec<PathBuf>> {
+fn _all_entries<D: Into<PathBuf>>(dir: D, include_dirs: bool) -> eyre::Result<Vec<String>> {
+    fn helper(dir: PathBuf, include_dirs: bool) -> eyre::Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
         for entry in dir.read_dir()? {
@@ -55,11 +64,11 @@ fn _all_entries<D: Into<PathBuf>>(dir: D, include_dirs: bool) -> anyhow::Result<
     Ok(files)
 }
 
-fn all_entries<D: Into<PathBuf>>(dir: D) -> anyhow::Result<Vec<String>> {
+fn all_entries<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, true)
 }
 
-fn all_files<D: Into<PathBuf>>(dir: D) -> anyhow::Result<Vec<String>> {
+fn all_files<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, false)
 }
 
@@ -94,8 +103,8 @@ macro_rules! hex_assert_eq {
 }
 
 #[test]
-fn init() -> Result {
-    init_logs();
+fn can_init() -> Result {
+    init();
     let dir = tempdir()?;
     writ::init(dir.path())?;
     assert_debug_snapshot!(all_entries(dir.path().join(".git"))?);
@@ -107,8 +116,8 @@ const NAME: &str = "Example Name";
 const EMAIL: &str = "example@example.com";
 
 #[test]
-fn basic_commit() -> Result {
-    init_logs();
+fn can_basic_commit() -> Result {
+    init();
 
     let msg = "Message";
 
@@ -145,8 +154,8 @@ fn basic_commit() -> Result {
 }
 
 #[test]
-fn commit_with_nested_files() -> Result {
-    init_logs();
+fn can_commit_with_nested_files() -> Result {
+    init();
 
     let msg = "Message";
 
@@ -183,8 +192,8 @@ fn commit_with_nested_files() -> Result {
 }
 
 #[test]
-fn basic_add() -> Result {
-    init_logs();
+fn can_basic_add() -> Result {
+    init();
 
     let dir_handle = tempdir()?;
     let dir = dir_handle.path();
@@ -215,8 +224,8 @@ fn basic_add() -> Result {
 }
 
 #[test]
-fn nested_add() -> Result {
-    init_logs();
+fn can_nested_add() -> Result {
+    init();
 
     let dir_handle = tempdir()?;
     let dir = dir_handle.path();
@@ -249,8 +258,8 @@ fn nested_add() -> Result {
 }
 
 #[test]
-fn duplicate_add() -> Result {
-    init_logs();
+fn can_duplicate_add() -> Result {
+    init();
 
     let dir_handle = tempdir()?;
     let dir = dir_handle.path();
@@ -284,7 +293,7 @@ fn duplicate_add() -> Result {
 
 #[test]
 fn nonexistent_add_fails() -> Result {
-    init_logs();
+    init();
 
     let dir_handle = tempdir()?;
     let dir = dir_handle.path();
