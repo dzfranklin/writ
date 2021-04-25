@@ -227,6 +227,41 @@ fn can_basic_add() -> Result {
 }
 
 #[test]
+fn can_add_executable() -> Result {
+    init();
+
+    let (dir_handle, repo) = repo_fixture()?;
+    let dir = dir_handle.path();
+    let dir_s = dir.to_str().unwrap();
+
+    fs::write(dir.join("random_name"), b"some contents")?;
+    (run_fun! {
+        cd $dir_s;
+        chmod +x random_name;
+    })?;
+
+    repo.add(vec!["random_name"])?;
+    let actual = fs::read(dir.join(".git/index"))?;
+
+    // Needed for git to accept
+    fs::write(dir.join(".git/HEAD"), "ref: refs/heads/master")?;
+
+    (run_fun! {
+        cd $dir_s;
+        rm .git/index;
+        git add random_name;
+    })?;
+
+    let expected = fs::read(dir.join(".git/index"))?;
+
+    std::mem::forget(dir_handle);
+
+    hex_assert_eq!(expected, actual);
+
+    Ok(())
+}
+
+#[test]
 fn can_nested_add() -> Result {
     init();
 
