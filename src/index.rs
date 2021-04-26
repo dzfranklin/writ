@@ -1,13 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::TryInto,
-    ffi::OsStr,
     io::{self, Read, Write},
     path::Path,
 };
 
 use crate::{locked_file, Entry, LockedFile, WithDigest, WsPath};
-use bstr::{BString, ByteSlice};
+use bstr::BString;
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
 

@@ -1,10 +1,8 @@
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use std::{
     convert::TryInto,
-    ffi::OsString,
     io,
-    os::unix::ffi::{OsStrExt, OsStringExt},
     time::{Duration, SystemTime},
 };
 
@@ -74,7 +72,7 @@ impl Entry {
             size: 0,
             oid: Oid::zero(),
             flags: Flags::from_path(&path),
-            path: path,
+            path,
         }
     }
 

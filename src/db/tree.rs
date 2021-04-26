@@ -79,7 +79,7 @@ impl Tree {
 impl Object for Tree {
     const TYPE: &'static [u8] = b"tree";
 
-    fn store(&self, db: &mut Db) -> db::StoreResult {
+    fn store(&self, db: &Db) -> db::StoreResult {
         let mut ser = BString::from(Vec::new());
 
         for (path, entry) in &self.0 {

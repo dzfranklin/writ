@@ -17,7 +17,7 @@ impl Blob {
 impl Object for Blob {
     const TYPE: &'static [u8] = b"blob";
 
-    fn store(&self, db: &mut Db) -> db::StoreResult {
+    fn store(&self, db: &Db) -> db::StoreResult {
         let contents = self.0.as_bstr();
         db.store::<Self>(contents)
     }

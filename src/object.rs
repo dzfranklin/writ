@@ -51,7 +51,7 @@ impl fmt::Debug for Oid {
 pub trait Object: fmt::Debug + Clone {
     const TYPE: &'static [u8];
 
-    fn store(&self, db: &mut Db) -> db::StoreResult;
+    fn store(&self, db: &Db) -> db::StoreResult;
 }
 
 #[derive(displaydoc::Display, thiserror::Error, Debug)]

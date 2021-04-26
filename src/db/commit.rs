@@ -26,7 +26,7 @@ impl Commit {
 impl Object for Commit {
     const TYPE: &'static [u8] = b"commit";
 
-    fn store(&self, db: &mut Db) -> db::StoreResult {
+    fn store(&self, db: &Db) -> db::StoreResult {
         let author = self.author.serialize();
 
         let parent_line = if let Some(parent) = self.parent.as_ref() {
