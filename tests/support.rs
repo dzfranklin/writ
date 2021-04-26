@@ -64,14 +64,17 @@ fn _all_entries<D: Into<PathBuf>>(dir: D, include_dirs: bool) -> eyre::Result<Ve
     Ok(files)
 }
 
+#[allow(unused)]
 pub fn all_entries<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, true)
 }
 
+#[allow(unused)]
 pub fn all_files<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, false)
 }
 
+#[allow(unused)]
 pub fn create_nested_files(dir: &Path) -> Result {
     fs::create_dir_all(dir.join("dir_1/dir_a/dir_x"))?;
     fs::create_dir_all(dir.join("dir_1/dir_a/dir_y"))?;
@@ -130,5 +133,8 @@ pub fn write_normalized(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> Resul
     Ok(())
 }
 
+#[allow(unused)]
 pub const NAME: &str = "Example Name";
+
+#[allow(unused)]
 pub const EMAIL: &str = "example@example.com";

@@ -1,4 +1,5 @@
 mod support;
+#[allow(unused)]
 use support::assert_eq;
 use support::*;
 
