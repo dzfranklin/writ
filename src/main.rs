@@ -1,4 +1,8 @@
-use std::path::PathBuf;
+use std::{
+    borrow::Cow,
+    env::{self, VarError},
+    path::PathBuf,
+};
 
 use structopt::StructOpt;
 use tracing::debug;
@@ -24,8 +28,14 @@ pub enum Opt {
 }
 
 fn main() -> eyre::Result<()> {
+    let filter = match env::var("RUST_LOG") {
+        Ok(var) => Cow::Owned(var),
+        Err(VarError::NotPresent) => Cow::Borrowed("warn"),
+        Err(err) => return Err(err.into()),
+    };
+    let filter = tracing_subscriber::EnvFilter::try_new(filter)?;
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(filter)
         .pretty()
         .init();
 
