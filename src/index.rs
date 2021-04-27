@@ -1,20 +1,24 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::TryInto,
+    fs::File,
     io::{self, Read, Write},
-    path::Path,
+    ops::Deref,
+    path::{Path, PathBuf},
 };
 
-use crate::{locked_file, Entry, LockedFile, WithDigest, WsPath};
+use crate::{locked_file, Entry, LockedFile, Stat, WithDigest, WsPath};
 use bstr::BString;
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
+use tracing::debug;
 
-#[derive(Debug)]
+type EntriesMap = BTreeMap<BString, Entry>;
+
+#[derive(Debug, Clone)]
 pub struct Index {
-    entries: BTreeMap<BString, Entry>,
-    parents: BTreeMap<BString, BTreeSet<BString>>,
-    lock: Option<LockedFile>,
+    entries: EntriesMap,
+    path: PathBuf,
 }
 
 impl Index {
@@ -22,37 +26,36 @@ impl Index {
     const VERSION: u32 = 2;
     const CHECKSUM_LEN: usize = 20;
 
-    /// Creates if doesn't already exist
     pub fn load<P: AsRef<Path>>(git_dir: P) -> Result<Self, LoadError> {
-        let file = git_dir.as_ref().join("index");
-        let lock = LockedFile::acquire(file)?;
+        let path = Self::file_path(git_dir);
+        let entries = Self::load_entries(&path)?;
 
-        let mut this = Self {
-            entries: BTreeMap::new(),
-            parents: BTreeMap::new(),
-            lock: None,
+        Ok(Self { entries, path })
+    }
+
+    /// Reload the index from disk. You don't need to do this after using
+    /// [`Self::modify`] on this instance, this is for getting changes made by
+    /// external programs.
+    pub fn reload(&mut self) -> Result<(), LoadError> {
+        let entries = Self::load_entries(&self.path)?;
+        self.entries = entries;
+        Ok(())
+    }
+
+    fn load_entries(path: &Path) -> Result<EntriesMap, LoadError> {
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                debug!("Index does not exist");
+                return Ok(BTreeMap::new());
+            }
+            Err(err) => return Err(err.into()),
         };
 
-        if let Some(existing) = lock.protected_file() {
-            this.load_from(existing)?;
-        }
-
-        this.lock = Some(lock);
-
-        Ok(this)
+        Self::load_entries_from(file)
     }
 
-    /// Committing a virtual `Index` will panic.
-    #[allow(dead_code)] // Used for tests
-    pub(crate) fn new_virtual() -> Self {
-        Self {
-            entries: BTreeMap::new(),
-            parents: BTreeMap::new(),
-            lock: None,
-        }
-    }
-
-    fn load_from(&mut self, mut reader: impl Read) -> Result<(), LoadError> {
+    fn load_entries_from(mut reader: impl Read) -> Result<EntriesMap, LoadError> {
         let mut input = WithDigest::new(&SHA1, &mut reader);
 
         let mut sig = [0; 4];
@@ -69,9 +72,10 @@ impl Index {
         let count = input.read_u32::<NetworkEndian>()?; // offset 8
 
         // offset 12
+        let mut entries = BTreeMap::new();
         for _ in 0..count {
             let entry = Entry::parse_from_index(&mut input)?;
-            self.add(entry);
+            entries.insert(entry.key().to_owned(), entry);
         }
 
         let expected_checksum = input.finish();
@@ -85,30 +89,75 @@ impl Index {
             return Err(CorruptError::IncorrectChecksum.into());
         }
 
-        Ok(())
+        Ok(entries)
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.values()
     }
 
+    pub fn modify(&mut self) -> Result<IndexMut, OpenForModificationsError> {
+        IndexMut::new(self)
+    }
+
+    pub fn is_tracked(&self, path: &WsPath) -> bool {
+        self.entries.contains_key(path.as_bstr())
+    }
+
+    pub fn entry(&self, path: &WsPath) -> Option<&Entry> {
+        self.entries.get(path.as_bstr())
+    }
+
+    fn file_path(git_dir: impl AsRef<Path>) -> PathBuf {
+        git_dir.as_ref().join("index")
+    }
+}
+
+type ParentsMap = BTreeMap<BString, BTreeSet<BString>>;
+
+#[derive(Debug)]
+#[allow(clippy::pedantic)]
+pub struct IndexMut<'i> {
+    index: &'i mut Index,
+    parents: ParentsMap,
+    lock: Option<LockedFile>,
+}
+
+impl<'i> IndexMut<'i> {
+    fn new(index: &'i mut Index) -> Result<Self, OpenForModificationsError> {
+        let lock = LockedFile::acquire(&index.path)?;
+
+        let mut parents = BTreeMap::new();
+        for entry in index.entries() {
+            Self::populate_parents_for(&mut parents, entry)
+        }
+
+        Ok(Self {
+            index,
+            parents,
+            lock: Some(lock),
+        })
+    }
+
     pub fn add(&mut self, entry: Entry) {
+        Self::populate_parents_for(&mut self.parents, &entry);
+        self.discard_conflicts_with(&entry.path());
+        self.index.entries.insert(entry.key().to_owned(), entry);
+    }
+
+    fn populate_parents_for(parents: &mut ParentsMap, entry: &Entry) {
         for parent in entry.path().iter_parents() {
-            self.parents
+            parents
                 .entry(parent)
                 .or_insert_with(BTreeSet::new)
                 .insert(entry.path().to_bstring());
         }
-
-        self.discard_conflicts_with(&entry.path());
-
-        self.entries.insert(entry.key().to_owned(), entry);
     }
 
     fn discard_conflicts_with(&mut self, path: &WsPath) {
         // If the new entry is lib/index/foo, remove lib and index.
         for parent in path.iter_parents() {
-            self.entries.remove(&parent);
+            self.index.entries.remove(&parent);
         }
 
         // If the new entry is lib, remove lib/index/foo and lib/index
@@ -127,8 +176,22 @@ impl Index {
         }
     }
 
-    fn remove(&mut self, path: &WsPath) -> Option<Entry> {
-        if let Some(entry) = self.entries.remove(path.as_bstr()) {
+    pub fn update_stat(
+        &mut self,
+        path: &WsPath,
+        stat: Stat,
+    ) -> Result<Stat, NonexistentEntryError> {
+        let entry = self
+            .index
+            .entries
+            .get_mut(path.as_bstr())
+            .ok_or(NonexistentEntryError)?;
+        let old = entry.update_stat(stat);
+        Ok(old)
+    }
+
+    pub fn remove(&mut self, path: &WsPath) -> Option<Entry> {
+        if let Some(entry) = self.index.entries.remove(path.as_bstr()) {
             for parent in path.iter_parents() {
                 if let Some(children) = self.parents.get_mut(&parent) {
                     children.remove(path.as_bstr());
@@ -149,10 +212,10 @@ impl Index {
 
         let mut out = WithDigest::new(&SHA1, &mut lock);
 
-        out.write_all(Self::SIG)?; // offset 0
-        out.write_u32::<NetworkEndian>(Self::VERSION)?; // offset 4
+        out.write_all(Index::SIG)?; // offset 0
+        out.write_u32::<NetworkEndian>(Index::VERSION)?; // offset 4
 
-        let size = self.entries.len().try_into().expect("Len overflowed");
+        let size = self.index.entries.len().try_into().expect("Len overflowed");
         out.write_u32::<NetworkEndian>(size)?; // offset 8
 
         for entry in self.entries() {
@@ -168,9 +231,17 @@ impl Index {
     }
 }
 
-impl Eq for Index {}
+impl Deref for IndexMut<'_> {
+    type Target = Index;
 
-impl PartialEq for Index {
+    fn deref(&self) -> &Self::Target {
+        &self.index
+    }
+}
+
+impl Eq for IndexMut<'_> {}
+
+impl PartialEq for IndexMut<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.entries().eq(other.entries())
     }
@@ -179,8 +250,6 @@ impl PartialEq for Index {
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
 /// Failed to load index
 pub enum LoadError {
-    /// Failed to lock index file
-    Locking(#[from] locked_file::Error),
     /// Failed to read index file, corrupt
     Corrupt(#[from] CorruptError),
     /// Only version 2 of the index file is supported, but index is version {0}
@@ -188,6 +257,26 @@ pub enum LoadError {
     /// Performing IO
     Io(#[from] io::Error),
 }
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub enum ModifyError {
+    /// Failed to open index for modifications
+    Open(#[from] OpenForModificationsError),
+    /// Failed to commit changes
+    Commit(#[from] CommitError),
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub enum OpenForModificationsError {
+    /// Failed to lock index file
+    Locking(#[from] locked_file::Error),
+    /// Performing IO
+    Io(#[from] io::Error),
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+/// Entry does not exit
+pub struct NonexistentEntryError;
 
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
 /// Failed to commit index
@@ -207,7 +296,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::{test_support::init, WsPath};
+    use crate::{test_support::init, Oid, WsPath};
     use insta::assert_debug_snapshot;
     use pretty_assertions::assert_eq;
 
@@ -216,24 +305,52 @@ mod tests {
         init();
 
         let sample = hex::decode(SAMPLE_INDEX)?;
-        let mut index = Index::new_virtual();
-        index.load_from(&*sample)?;
+        let actual = Index::load_entries_from(&*sample)?;
 
-        assert_debug_snapshot!(index);
+        assert_debug_snapshot!(actual);
 
         Ok(())
     }
 
+    fn index_fixture() -> eyre::Result<(tempfile::NamedTempFile, Index)> {
+        let file = tempfile::NamedTempFile::new()?;
+        let index = Index {
+            entries: BTreeMap::new(),
+            path: file.path().to_owned(),
+        };
+
+        Ok((file, index))
+    }
+
+    fn entry_fixture(path: impl Into<PathBuf>) -> Entry {
+        Entry::new(WsPath::new_unchecked(path), Oid::zero(), Stat::zeroed())
+    }
+
     #[test]
-    fn handles_replacing_file_with_directory_of_same_name() {
+    fn populates_parents_correctly() {
         init();
 
-        let mut index = Index::new_virtual();
+        let mut actual = BTreeMap::new();
+        let entry = entry_fixture("dir_1/dir_2/second_level");
+        IndexMut::populate_parents_for(&mut actual, &entry);
+        assert_debug_snapshot!("parents_after_entry_1", actual);
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
-        index.add(Entry::zeroed(WsPath::new_unchecked("bob.txt")));
+        let entry = entry_fixture("dir_1/dir_3/second_level");
+        IndexMut::populate_parents_for(&mut actual, &entry);
+        assert_debug_snapshot!("parents_after_entry_2", actual);
+    }
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt/nested.txt")));
+    #[test]
+    fn handles_replacing_file_with_directory_of_same_name() -> eyre::Result<()> {
+        init();
+
+        let (_file, mut index) = index_fixture()?;
+        let mut index = index.modify()?;
+
+        index.add(entry_fixture("alice.txt"));
+        index.add(entry_fixture("bob.txt"));
+
+        index.add(entry_fixture("alice.txt/nested.txt"));
 
         let actual = index
             .entries()
@@ -243,18 +360,21 @@ mod tests {
         let expected: Vec<PathBuf> = vec!["alice.txt/nested.txt".into(), "bob.txt".into()];
 
         assert_eq!(expected, actual);
+
+        Ok(())
     }
 
     #[test]
-    fn handles_replacing_a_dir_with_a_file() {
+    fn handles_replacing_a_dir_with_a_file() -> eyre::Result<()> {
         init();
 
-        let mut index = Index::new_virtual();
+        let (_file, mut index) = index_fixture()?;
+        let mut index = index.modify()?;
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
-        index.add(Entry::zeroed(WsPath::new_unchecked("nested/bob.txt")));
+        index.add(entry_fixture("alice.txt"));
+        index.add(entry_fixture("nested/bob.txt"));
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("nested")));
+        index.add(entry_fixture("nested"));
 
         let actual = index
             .entries()
@@ -264,21 +384,22 @@ mod tests {
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
 
         assert_eq!(expected, actual);
+
+        Ok(())
     }
 
     #[test]
-    fn handles_replacing_a_dir_with_children_with_a_file() {
+    fn handles_replacing_a_dir_with_children_with_a_file() -> eyre::Result<()> {
         init();
 
-        let mut index = Index::new_virtual();
+        let (_file, mut index) = index_fixture()?;
+        let mut index = index.modify()?;
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("alice.txt")));
-        index.add(Entry::zeroed(WsPath::new_unchecked("nested/bob.txt")));
-        index.add(Entry::zeroed(WsPath::new_unchecked(
-            "nested/inner/claire.txt",
-        )));
+        index.add(entry_fixture("alice.txt"));
+        index.add(entry_fixture("nested/bob.txt"));
+        index.add(entry_fixture("nested/inner/claire.txt"));
 
-        index.add(Entry::zeroed(WsPath::new_unchecked("nested")));
+        index.add(entry_fixture("nested"));
 
         let actual = index
             .entries()
@@ -288,6 +409,8 @@ mod tests {
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
 
         assert_eq!(expected, actual);
+
+        Ok(())
     }
 
     const SAMPLE_INDEX: &str = "\

@@ -39,23 +39,13 @@ impl Db {
         }
     }
 
-    pub(crate) fn store<O: Object>(&self, content: &BStr) -> Result<Oid, StoreError> {
-        let o_type = O::TYPE;
-        let size = content.len().to_string();
-
-        let mut ser = Vec::with_capacity(o_type.len() + 1 + size.len() + 1 + content.len());
-        ser.extend(o_type);
-        ser.push(b' ');
-        ser.extend(size.as_bytes());
-        ser.push(b'\0');
-        ser.extend(content.iter());
-
-        let oid = Oid::for_bytes(&ser);
-        self.write_object(&oid, &ser)?;
+    pub fn store<O: Object>(&self, content: &BStr) -> Result<Oid, StoreError> {
+        let oid = O::compute_oid(content);
+        self.store_as(&oid, content)?;
         Ok(oid)
     }
 
-    fn write_object(&self, oid: &Oid, content: &[u8]) -> io::Result<()> {
+    pub fn store_as(&self, oid: &Oid, content: &[u8]) -> io::Result<()> {
         let oid = oid.to_hex();
         let dir = self.path.join(&oid[0..2]);
         let name = &oid[2..];

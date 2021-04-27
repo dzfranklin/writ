@@ -52,6 +52,20 @@ pub trait Object: fmt::Debug + Clone {
     const TYPE: &'static [u8];
 
     fn store(&self, db: &Db) -> db::StoreResult;
+
+    fn compute_oid(serialized: &BStr) -> Oid {
+        let o_type = Self::TYPE;
+        let size = serialized.len().to_string();
+
+        let mut ser = Vec::with_capacity(o_type.len() + 1 + size.len() + 1 + serialized.len());
+        ser.extend(o_type);
+        ser.push(b' ');
+        ser.extend(size.as_bytes());
+        ser.push(b'\0');
+        ser.extend(serialized.iter());
+
+        Oid::for_bytes(&ser)
+    }
 }
 
 #[derive(displaydoc::Display, thiserror::Error, Debug)]

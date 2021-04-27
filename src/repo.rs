@@ -1,23 +1,33 @@
 use std::{
-    env, fs,
+    collections::BTreeMap,
+    env, fmt, fs,
     io::{self},
     path::{Path, PathBuf},
 };
 
-use crate::{db, index, object, refs, ws, Db, Entry, Index, Object, Oid, Refs, Workspace};
+use crate::{
+    db,
+    entry::{self, StatusChatty},
+    index, object, refs,
+    ws::{self, ListFilesError, ReadFileError, StatFileError},
+    Db, Entry, FileStatus, Index, Object, Oid, Refs, Status, Workspace, WsPath,
+};
+use bstr::BString;
 use chrono::Local;
-use tracing::info;
+use tracing::{debug, instrument};
 
 #[derive(Debug, Clone)]
 pub struct Repo {
     git_dir: PathBuf,
-    workspace: Workspace,
-    db: Db,
-    refs: Refs,
+    pub workspace: Workspace,
+    pub db: Db,
+    pub refs: Refs,
+    pub index: Index,
 }
 
 impl Repo {
-    pub fn new(workspace: impl Into<PathBuf>) -> Result<Self, ReadError> {
+    #[instrument(err)]
+    pub fn new(workspace: impl Into<PathBuf> + fmt::Debug) -> Result<Self, ReadError> {
         let workspace_dir = workspace.into();
         let workspace_dir = workspace_dir
             .canonicalize()
@@ -35,14 +45,14 @@ impl Repo {
         let workspace = Workspace::new(workspace_dir);
         let db = Db::new(&git_dir);
         let refs = Refs::new(&git_dir);
-
-        info!("Opened repository {:?}", workspace);
+        let index = Index::load(&git_dir)?;
 
         Ok(Self {
             git_dir,
             workspace,
             db,
             refs,
+            index,
         })
     }
 
@@ -51,7 +61,8 @@ impl Repo {
         Ok(Self::new(dir)?)
     }
 
-    pub fn init(workspace: impl Into<PathBuf>) -> Result<Self, InitError> {
+    #[instrument(err)]
+    pub fn init(workspace: impl Into<PathBuf> + fmt::Debug) -> Result<Self, InitError> {
         let workspace_dir = workspace.into();
 
         fs::create_dir_all(&workspace_dir)
@@ -73,48 +84,36 @@ impl Repo {
         let workspace = Workspace::new(workspace_dir);
         let db = Db::new(&git_dir);
         let refs = Refs::new(&git_dir);
-
-        info!("Initialized repository in {:?}", workspace);
+        let index = Index::load(&git_dir)?;
 
         Ok(Self {
             git_dir,
             workspace,
             db,
             refs,
+            index,
         })
     }
 
-    pub fn load_index(&self) -> Result<Index, index::LoadError> {
-        Index::load(&self.git_dir)
-    }
-
-    pub fn db(&self) -> &Db {
-        &self.db
-    }
-
-    pub fn refs(&self) -> &Refs {
-        &self.refs
-    }
-
-    pub fn workspace(&self) -> &Workspace {
-        &self.workspace
-    }
-
-    pub fn add<P>(&self, files: Vec<P>) -> Result<(), AddError>
+    #[instrument(err)]
+    pub fn add<P>(&mut self, files: Vec<P>) -> Result<(), AddError>
     where
-        P: AsRef<Path>,
+        P: AsRef<Path> + fmt::Debug,
     {
-        let workspace = self.workspace();
-        let db = self.db();
-        let mut index = self.load_index()?;
+        let workspace = &self.workspace;
+        let db = &self.db;
+        let mut index = self.index.modify()?;
 
         for file in workspace.find_files(files)? {
-            let data = workspace.read_file(&file).map_err(AddError::ReadFile)?;
-            let stat = workspace.stat(&file).map_err(AddError::ReadFile)?;
+            let data = workspace.read_file(&file)?;
+            let stat = workspace.stat(&file)?;
 
             let blob = db::Blob::new(data);
             let oid = blob.store(&db)?;
-            index.add(Entry::from(file, oid, &stat));
+            let entry = Entry::new(file, oid, stat);
+
+            debug!("Adding {:?}", entry);
+            index.add(entry);
         }
 
         index.commit()?;
@@ -122,7 +121,14 @@ impl Repo {
         Ok(())
     }
 
-    pub fn commit(&self, name: String, email: String, mut msg: String) -> Result<(), CommitError> {
+    #[instrument(err)]
+    pub fn commit(
+        &mut self,
+        name: impl Into<String> + fmt::Debug,
+        email: impl Into<String> + fmt::Debug,
+        msg: impl Into<String> + fmt::Debug,
+    ) -> Result<(), CommitError> {
+        let mut msg = msg.into();
         if msg.is_empty() {
             return Err(CommitError::EmptyMessage);
         }
@@ -130,9 +136,12 @@ impl Repo {
             msg.push('\n');
         }
 
-        let db = self.db();
-        let index = self.load_index()?;
-        let refs = self.refs();
+        let name = name.into();
+        let email = email.into();
+
+        let db = &self.db;
+        let refs = &self.refs;
+        let index = &self.index;
 
         let entries: Vec<_> = index.entries().map(Clone::clone).collect();
 
@@ -141,18 +150,62 @@ impl Repo {
 
         let parent = refs.read_head()?.map(Oid::parse).transpose()?;
         let author = db::Author::new(name, email, Local::now());
-        let commit = db::Commit::new(parent, root_oid, author, msg.clone());
+        let commit = db::Commit::new(parent, root_oid, author, msg);
         let commit_oid = commit.store(&db)?;
         refs.update_head(&commit_oid)?;
-
-        info!(oid=?commit_oid, ?msg, "Commit");
 
         Ok(())
     }
 
-    // pub fn status(&self) {
+    /// Unlike git, this lists files only. Children of untracked directories are
+    /// reported instead of reporting the directory itself.
+    #[instrument(err)]
+    pub fn status(&mut self) -> Result<BTreeMap<BString, FileStatus>, StatusError> {
+        let mut status = self
+            .workspace
+            .list_files()?
+            .into_iter()
+            .map(|path| {
+                let key = path.to_bstring();
+                let status = self.status_of(path)?;
+                Ok((key, status))
+            })
+            .collect::<Result<BTreeMap<_, _>, StatusError>>()?;
 
-    // }
+        for entry in self.index.entries() {
+            if !status.contains_key(entry.key()) {
+                let value = FileStatus::new(entry.path().clone(), Status::Deleted);
+                status.insert(entry.key().to_owned(), value);
+            }
+        }
+
+        Ok(status)
+    }
+
+    pub fn status_of(&mut self, path: WsPath) -> Result<FileStatus, StatusError> {
+        let status = if let Some(entry) = self.index.entry(&path) {
+            match entry.status_chatty(&self.workspace)? {
+                StatusChatty::Unmodified => Status::Unmodified,
+                StatusChatty::UnmodifiedButNewStat(new_stat) => {
+                    let mut index = self
+                        .index
+                        .modify()
+                        .map_err(|e| StatusError::UpdateIndex(e.into()))?;
+                    index.update_stat(&path, new_stat).expect("Entry exists");
+                    index
+                        .commit()
+                        .map_err(|e| StatusError::UpdateIndex(e.into()))?;
+                    Status::Unmodified
+                }
+                StatusChatty::Modified => Status::Modified,
+                StatusChatty::Deleted => Status::Deleted,
+            }
+        } else {
+            Status::Untracked
+        };
+
+        Ok(FileStatus::new(path, status))
+    }
 }
 
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
@@ -160,10 +213,14 @@ impl Repo {
 pub enum InitError {
     /// Directory {0:?} already exists
     Exists(PathBuf),
+    /// Failed to create workspace directory {0:?}
+    CreateWorkspace(PathBuf, #[source] io::Error),
     /// Failed to open directory {0:?} to initialize
     Open(PathBuf, #[source] io::Error),
     /// Failed to populate {0:?}
     Write(PathBuf, #[source] io::Error),
+    /// Failed to open index
+    OpenIndex(#[from] index::LoadError),
 }
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -173,6 +230,8 @@ pub enum ReadError {
     NotRepo(PathBuf),
     /// IO error while checking if directory {0:?} is a git repository
     Io(PathBuf, #[source] io::Error),
+    /// Failed to open index
+    OpenIndex(#[from] index::LoadError),
 }
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -187,11 +246,13 @@ pub enum ForCurrentDirError {
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 pub enum AddError {
     /// Failed to load index
-    LoadIndex(#[from] index::LoadError),
+    LoadIndex(#[from] index::OpenForModificationsError),
     /// Failed to find files provided in repository
-    FindFiles(#[from] ws::FindFilesError),
+    FindFiles(#[from] ws::ListFilesError),
+    /// Failed to stat file
+    Stat(#[from] StatFileError),
     /// Failed to read file
-    ReadFile(#[source] io::Error),
+    Read(#[from] ReadFileError),
     /// Failed to store blob
     StoreBlob(#[from] db::StoreError),
     /// Failed to commit changes to index
@@ -203,7 +264,7 @@ pub enum CommitError {
     /// Empty commit message
     EmptyMessage,
     /// Failed to load index
-    LoadIndex(#[from] index::LoadError),
+    LoadIndex(#[from] index::OpenForModificationsError),
     /// Failed to store blob
     StoreBlob(#[from] db::StoreError),
     /// Failed to read ref
@@ -212,4 +273,14 @@ pub enum CommitError {
     ParseParentOid(#[from] object::ParseOidError),
     /// Failed to update ref
     UpdateRef(#[from] refs::UpdateError),
+}
+
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub enum StatusError {
+    /// Failed to list files
+    ListFiles(#[from] ListFilesError),
+    /// Failed to check if file unchanged
+    IsUnchanged(#[from] entry::IsUnchangedError),
+    /// Failed to update index with new stat
+    UpdateIndex(#[from] index::ModifyError),
 }

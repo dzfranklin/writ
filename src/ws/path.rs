@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    fmt,
     os::unix::prelude::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
 };
@@ -8,7 +9,7 @@ use bstr::{BStr, BString, ByteSlice};
 
 use crate::Workspace;
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(clippy::module_name_repetitions)]
 pub struct WsPath(PathBuf);
 
@@ -88,6 +89,12 @@ impl WsPath {
     }
 }
 
+impl fmt::Display for WsPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_bstr())
+    }
+}
+
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
 pub enum NewCanonicalizeError {
     /// IO error canonicalizing {0:?}
@@ -117,6 +124,36 @@ impl AsRef<BStr> for WsPath {
 impl From<WsPath> for BString {
     fn from(path: WsPath) -> Self {
         path.to_bstring()
+    }
+}
+
+impl PartialOrd for WsPath {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.as_bstr().partial_cmp(other.as_bstr())
+    }
+}
+
+impl Ord for WsPath {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_bstr().cmp(other.as_bstr())
+    }
+}
+
+impl PartialEq<BStr> for WsPath {
+    fn eq(&self, other: &BStr) -> bool {
+        self.as_bstr().eq(other)
+    }
+}
+
+impl PartialEq<str> for WsPath {
+    fn eq(&self, other: &str) -> bool {
+        self.as_bstr().eq(other.as_bytes().as_bstr())
+    }
+}
+
+impl PartialEq<WsPath> for str {
+    fn eq(&self, other: &WsPath) -> bool {
+        self.as_bytes().as_bstr().eq(other.as_bstr())
     }
 }
 

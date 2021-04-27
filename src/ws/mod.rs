@@ -5,11 +5,11 @@ use crate::Stat;
 
 use bstr::BString;
 use std::{
-    fs, io,
+    fmt, fs, io,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
-use tracing::debug;
+use tracing::{debug, instrument};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -27,42 +27,74 @@ impl Workspace {
         &self.path
     }
 
-    pub fn find_files<P: AsRef<Path>>(&self, paths: Vec<P>) -> Result<Vec<WsPath>, FindFilesError> {
+    #[instrument(err)]
+    pub fn find_files<P>(&self, paths: Vec<P>) -> Result<Vec<WsPath>, ListFilesError>
+    where
+        P: AsRef<Path> + fmt::Debug,
+    {
         let mut files = Vec::new();
 
         for rel_path in paths {
-            let abs_path = self.path.join(rel_path).canonicalize()?;
-
-            // we re-compute this to canonicalize
-            let rel_path = abs_path
-                .strip_prefix(&self.path)
-                .map_err(|_| FindFilesError::OutsideOfWorkspace(abs_path.clone()))?;
-
-            let meta = abs_path.metadata()?;
-
-            if Self::is_ignored(&rel_path) {
-                continue;
-            }
-
-            if meta.is_dir() {
-                debug!("Listing directory {:?}", rel_path);
-
-                let children = abs_path
-                    .read_dir()?
-                    .map(|e| Ok(rel_path.join(e?.file_name())))
-                    .collect::<Result<Vec<_>, io::Error>>()?;
-
-                files.extend(self.find_files(children)?);
-            } else if meta.is_file() {
-                debug!("Listed file {:?}", rel_path);
-
-                files.push(WsPath::new_unchecked(rel_path));
-            } else {
-                return Err(FindFilesError::InvalidFileType(rel_path.into()));
-            }
+            let rel_path = rel_path.as_ref();
+            let abs_path = self
+                .path
+                .join(rel_path)
+                .canonicalize()
+                .map_err(|e| ListFilesError::Canonicalize(rel_path.to_owned(), e))?;
+            self.list_files_in(&abs_path, &mut files)?;
         }
 
         Ok(files)
+    }
+
+    #[instrument(err)]
+    pub fn list_files(&self) -> Result<Vec<WsPath>, ListFilesError> {
+        let mut files = Vec::new();
+        self.list_files_in(&self.path, &mut files)?;
+        Ok(files)
+    }
+
+    fn list_files_in(
+        &self,
+        abs_path: &Path,
+        files: &mut Vec<WsPath>,
+    ) -> Result<(), ListFilesError> {
+        // we re-compute this to canonicalize
+        let rel_path = abs_path
+            .strip_prefix(&self.path)
+            .map_err(|_| ListFilesError::OutsideOfWorkspace(abs_path.to_owned()))?;
+
+        let meta = abs_path
+            .metadata()
+            .map_err(|e| ListFilesError::GetMetadata(abs_path.to_owned(), e))?;
+
+        if Self::is_ignored(&rel_path) {
+            return Ok(());
+        }
+
+        if meta.is_dir() {
+            debug!("Listing directory {:?}", rel_path);
+
+            let children = abs_path
+                .read_dir()
+                .map_err(|e| ListFilesError::ReadDir(abs_path.to_owned(), e))?
+                .map(|entry| {
+                    let entry =
+                        entry.map_err(|e| ListFilesError::ReadDirEntry(abs_path.to_owned(), e))?;
+                    Ok(rel_path.join(entry.file_name()))
+                })
+                .collect::<Result<Vec<_>, ListFilesError>>()?;
+
+            files.extend(self.find_files(children)?);
+        } else if meta.is_file() {
+            debug!("Listed file {:?}", rel_path);
+
+            files.push(WsPath::new_unchecked(rel_path));
+        } else {
+            return Err(ListFilesError::InvalidFileType(rel_path.into()));
+        }
+
+        Ok(())
     }
 
     fn is_ignored(rel_path: &Path) -> bool {
@@ -71,24 +103,48 @@ impl Workspace {
             .any(|&ignored| rel_path.as_os_str().as_bytes() == ignored)
     }
 
-    pub fn read_file(&self, path: &WsPath) -> io::Result<BString> {
-        let bytes = fs::read(path.to_absolute(self))?;
+    pub fn read_file(&self, path: &WsPath) -> Result<BString, ReadFileError> {
+        let bytes = fs::read(path.to_absolute(self)).map_err(|e| ReadFileError(path.clone(), e))?;
         Ok(bytes.into())
     }
 
-    pub fn stat<P: AsRef<Path>>(&self, path: P) -> io::Result<Stat> {
-        self.path.join(path).metadata().map(Stat::new)
+    pub fn stat(&self, path: &WsPath) -> Result<Stat, StatFileError> {
+        self.path
+            .join(path)
+            .metadata()
+            .map(|m| Stat::from(&m))
+            .map_err(|e| StatFileError(path.clone(), e))
     }
 }
 
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
-pub enum FindFilesError {
+/// Failed to stat file {0:?}
+pub struct StatFileError(WsPath, io::Error);
+
+impl StatFileError {
+    pub(crate) fn is_not_found(&self) -> bool {
+        self.1.kind() == io::ErrorKind::NotFound
+    }
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+/// Failed to read file {0:?}
+pub struct ReadFileError(WsPath, io::Error);
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub enum ListFilesError {
     /// {0:?} is neither a file nor a directory.
     InvalidFileType(PathBuf),
     /// Path {0:?} is outside the workspace
     OutsideOfWorkspace(PathBuf),
-    /// IO
-    Io(#[from] io::Error),
+    /// Failed to canonicalize path {0:?}
+    Canonicalize(PathBuf, #[source] io::Error),
+    /// Failed to get metadata of {0:?}
+    GetMetadata(PathBuf, #[source] io::Error),
+    /// Failed to read directory {0:?}
+    ReadDir(PathBuf, #[source] io::Error),
+    /// Failed to read entry of directory {0:?}
+    ReadDirEntry(PathBuf, #[source] io::Error),
 }
 
 #[cfg(test)]

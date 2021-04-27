@@ -1,0 +1,13 @@
+---
+source: src/index.rs
+expression: actual
+
+---
+{
+    "dir_1": {
+        "dir_1/dir_2/second_level",
+    },
+    "dir_1/dir_2": {
+        "dir_1/dir_2/second_level",
+    },
+}

@@ -1,11 +1,12 @@
 ---
 source: tests/add.rs
-expression: "repo.add(vec![\"random_name\"])"
+expression: "repo.add(vec![\"nonexistent\"])"
 
 ---
 Err(
     FindFiles(
-        Io(
+        Canonicalize(
+            "nonexistent",
             Os {
                 code: 2,
                 kind: NotFound,

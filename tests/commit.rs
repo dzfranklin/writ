@@ -8,17 +8,17 @@ fn can_basic_commit() -> Result {
 
     let msg = "Message";
 
-    let (actual, repo) = repo_fixture()?;
+    let (actual, mut repo) = repo_fixture()?;
     let actual = actual.path();
 
-    write_normalized(actual.join("file.txt"), "File contents\n")?;
+    write_to(actual.join("file.txt"), "File contents\n")?;
     repo.add(vec!["file.txt"])?;
     repo.commit(NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
 
     let expected = tempdir()?;
     let expected = expected.path();
     let expected_s = expected.to_str().unwrap();
-    write_normalized(expected.join("file.txt"), "File contents\n")?;
+    write_to(expected.join("file.txt"), "File contents\n")?;
     (run_fun! {
         cd $expected_s;
         git init;
@@ -45,7 +45,7 @@ fn can_commit_with_nested_files() -> Result {
 
     let msg = "Message";
 
-    let (actual, repo) = repo_fixture()?;
+    let (actual, mut repo) = repo_fixture()?;
     let actual = actual.path();
     create_nested_files(actual)?;
     repo.add(vec!["."])?;

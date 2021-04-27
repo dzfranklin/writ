@@ -1,27 +1,19 @@
 use bstr::{BStr, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use std::{
-    convert::TryInto,
-    io,
-    time::{Duration, SystemTime},
-};
+use std::{convert::TryInto, fmt, io};
+use tracing::{debug, instrument};
 
 use crate::{
+    db::Blob,
     stat::{self, Mode},
-    Oid, Stat, WsPath,
+    ws::{ReadFileError, StatFileError},
+    Object, Oid, Stat, Workspace, WsPath,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Entry {
     pub oid: Oid,
-    pub ctime: SystemTime,
-    pub mtime: SystemTime,
-    pub dev: u32,
-    pub ino: u32,
-    pub mode: Mode,
-    pub uid: u32,
-    pub gid: u32,
-    pub size: u32,
+    pub stat: Stat,
     pub flags: Flags,
     pub path: WsPath,
 }
@@ -41,36 +33,11 @@ impl Entry {
     const BLOCK_SIZE: usize = 8;
     const PATH_OFFSET: usize = 62;
 
-    pub fn from(path: impl Into<WsPath>, oid: Oid, stat: &Stat) -> Self {
+    pub fn new(path: impl Into<WsPath>, oid: Oid, stat: Stat) -> Self {
         let path = path.into();
         Self {
-            ctime: stat.ctime(),
-            mtime: stat.mtime(),
-            dev: stat.dev(),
-            ino: stat.ino(),
-            mode: stat.mode(),
-            uid: stat.uid(),
-            gid: stat.gid(),
-            size: stat.size(),
             oid,
-            flags: Flags::from_path(&path),
-            path,
-        }
-    }
-
-    #[allow(dead_code)] // Used for tests
-    pub(crate) fn zeroed(path: impl Into<WsPath>) -> Self {
-        let path = path.into();
-        Self {
-            ctime: SystemTime::UNIX_EPOCH,
-            mtime: SystemTime::UNIX_EPOCH,
-            dev: 0,
-            ino: 0,
-            mode: Mode::Regular,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid: Oid::zero(),
+            stat,
             flags: Flags::from_path(&path),
             path,
         }
@@ -89,25 +56,80 @@ impl Entry {
     }
 
     pub fn mode(&self) -> stat::Mode {
-        self.mode
+        self.stat.mode
+    }
+
+    pub fn update_stat(&mut self, stat: Stat) -> Stat {
+        let old = self.stat;
+        self.stat = stat;
+        old
+    }
+
+    #[instrument(err)]
+    pub(crate) fn status_chatty(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<StatusChatty, IsUnchangedError> {
+        let new_stat = match workspace.stat(&self.path) {
+            Ok(stat) => stat,
+            Err(err) if err.is_not_found() => {
+                debug!("Determined deleted based on stat failure");
+                return Ok(StatusChatty::Deleted);
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        if self.stat.size != new_stat.size || self.stat.mode != new_stat.mode {
+            debug!(
+                "Determined changed based on size or mode. other: {:?}",
+                new_stat
+            );
+            return Ok(StatusChatty::Modified);
+        }
+
+        if self.times_match(&new_stat) {
+            debug!(
+                "Determined unchanged based on timestamps. other: {:?}",
+                new_stat
+            );
+            return Ok(StatusChatty::Unmodified);
+        }
+
+        let new_data = workspace.read_file(&self.path)?;
+        let new_oid = Blob::compute_oid(new_data.as_bstr());
+
+        if self.oid == new_oid {
+            debug!("Determined unchanged based on hash of contents");
+            Ok(StatusChatty::UnmodifiedButNewStat(new_stat))
+        } else {
+            debug!(
+                "Determined changed based on hash of contents. other_oid: {:?}",
+                new_oid
+            );
+            Ok(StatusChatty::Modified)
+        }
+    }
+
+    fn times_match(&self, other: &Stat) -> bool {
+        self.stat.mtime == other.mtime && self.stat.ctime == other.ctime
     }
 
     #[allow(clippy::similar_names)] // unixisms
     pub fn write_to_index(&self, writer: &mut impl io::Write) -> io::Result<()> {
-        let (ctime_i, ctime_n) = Self::systemtime_to_epoch(self.ctime);
+        let (ctime_i, ctime_n) = self.stat.ctime_epoch();
         writer.write_u32::<NetworkEndian>(ctime_i)?; // offset 0
         writer.write_u32::<NetworkEndian>(ctime_n)?; // offset 4
 
-        let (mtime_i, mtime_n) = Self::systemtime_to_epoch(self.mtime);
+        let (mtime_i, mtime_n) = self.stat.mtime_epoch();
         writer.write_u32::<NetworkEndian>(mtime_i)?; // offset 8
         writer.write_u32::<NetworkEndian>(mtime_n)?; // offset 12
 
-        writer.write_u32::<NetworkEndian>(self.dev)?; // offset 16
-        writer.write_u32::<NetworkEndian>(self.ino)?; // offset 24
-        writer.write_u32::<NetworkEndian>(self.mode.as_u32())?; // offset 28
-        writer.write_u32::<NetworkEndian>(self.uid)?; // offset 32
-        writer.write_u32::<NetworkEndian>(self.gid)?; // offset 36
-        writer.write_u32::<NetworkEndian>(self.size)?; // offset 40
+        writer.write_u32::<NetworkEndian>(self.stat.dev)?; // offset 16
+        writer.write_u32::<NetworkEndian>(self.stat.ino)?; // offset 24
+        writer.write_u32::<NetworkEndian>(self.stat.mode.as_u32())?; // offset 28
+        writer.write_u32::<NetworkEndian>(self.stat.uid)?; // offset 32
+        writer.write_u32::<NetworkEndian>(self.stat.gid)?; // offset 36
+        writer.write_u32::<NetworkEndian>(self.stat.size)?; // offset 40
 
         writer.write_all(self.oid.as_bytes())?; // offset 60
         writer.write_u16::<NetworkEndian>(self.flags.as_u16())?; // offset 62
@@ -125,11 +147,11 @@ impl Entry {
     pub fn parse_from_index(reader: &mut impl io::Read) -> io::Result<Self> {
         let ctime_i = reader.read_u32::<NetworkEndian>()?; // offset 0
         let ctime_n = reader.read_u32::<NetworkEndian>()?; // offset 4
-        let ctime = Self::systemtime_from_epoch(ctime_i, ctime_n);
+        let ctime = Stat::systemtime_from_epoch(ctime_i, ctime_n);
 
         let mtime_i = reader.read_u32::<NetworkEndian>()?; // offset 8
         let mtime_n = reader.read_u32::<NetworkEndian>()?; // offset 12
-        let mtime = Self::systemtime_from_epoch(mtime_i, mtime_n);
+        let mtime = Stat::systemtime_from_epoch(mtime_i, mtime_n);
 
         let dev = reader.read_u32::<NetworkEndian>()?; // offset 16
         let ino = reader.read_u32::<NetworkEndian>()?; // offset 24
@@ -140,6 +162,17 @@ impl Entry {
         let uid = reader.read_u32::<NetworkEndian>()?; // offset 32
         let gid = reader.read_u32::<NetworkEndian>()?; // offset 36
         let size = reader.read_u32::<NetworkEndian>()?; // offset 40
+
+        let stat = Stat {
+            ctime,
+            mtime,
+            dev,
+            ino,
+            mode,
+            uid,
+            gid,
+            size,
+        };
 
         let mut oid = [0; Oid::SIZE];
         reader.read_exact(&mut oid)?; // offset 60
@@ -164,14 +197,7 @@ impl Entry {
 
         Ok(Self {
             oid,
-            ctime,
-            mtime,
-            dev,
-            ino,
-            mode,
-            uid,
-            gid,
-            size,
+            stat,
             flags,
             path,
         })
@@ -182,19 +208,11 @@ impl Entry {
         // See <https://stackoverflow.com/a/11642218>
         (Self::BLOCK_SIZE - (len % Self::BLOCK_SIZE)) % Self::BLOCK_SIZE
     }
+}
 
-    fn systemtime_to_epoch(time: SystemTime) -> (u32, u32) {
-        let dur = time
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Not before epoch");
-
-        let secs: u32 = dur.as_secs().try_into().expect("Time overflowed");
-
-        (secs, dur.subsec_nanos())
-    }
-
-    fn systemtime_from_epoch(secs: u32, nanos: u32) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::new(u64::from(secs), nanos)
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Entry {} {:?}", self.path, self.oid)
     }
 }
 
@@ -235,4 +253,19 @@ impl PathLen {
             Self::MaxOrGreater
         }
     }
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub enum IsUnchangedError {
+    /// Failed to stat file
+    Stat(#[from] StatFileError),
+    /// Failed to read file
+    Read(#[from] ReadFileError),
+}
+
+pub(crate) enum StatusChatty {
+    Unmodified,
+    UnmodifiedButNewStat(Stat),
+    Modified,
+    Deleted,
 }

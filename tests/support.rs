@@ -1,3 +1,4 @@
+#![allow(dead_code)] // tests don't count
 use std::{
     path::{Path, PathBuf},
     sync::Once,
@@ -64,29 +65,26 @@ fn _all_entries<D: Into<PathBuf>>(dir: D, include_dirs: bool) -> eyre::Result<Ve
     Ok(files)
 }
 
-#[allow(unused)]
 pub fn all_entries<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, true)
 }
 
-#[allow(unused)]
 pub fn all_files<D: Into<PathBuf>>(dir: D) -> eyre::Result<Vec<String>> {
     _all_entries(dir, false)
 }
 
-#[allow(unused)]
 pub fn create_nested_files(dir: &Path) -> Result {
     fs::create_dir_all(dir.join("dir_1/dir_a/dir_x"))?;
     fs::create_dir_all(dir.join("dir_1/dir_a/dir_y"))?;
     fs::create_dir_all(dir.join("dir_2/dir_a/dir_x"))?;
 
-    write_normalized(dir.join("f"), "in /")?;
-    write_normalized(dir.join("dir_1/f"), "in /1 #1")?;
-    write_normalized(dir.join("dir_1/f2"), "in /1 #2")?;
-    write_normalized(dir.join("dir_1/dir_a/f"), "in /1/a")?;
-    write_normalized(dir.join("dir_1/dir_a/dir_x/f"), "in /1/a/x")?;
-    write_normalized(dir.join("dir_1/dir_a/dir_y/f"), "in /1/a/y")?;
-    write_normalized(dir.join("dir_2/dir_a/dir_x/f"), "in /2/a/x")?;
+    write_to(dir.join("f"), "in /")?;
+    write_to(dir.join("dir_1/f"), "in /1 #1")?;
+    write_to(dir.join("dir_1/f2"), "in /1 #2")?;
+    write_to(dir.join("dir_1/dir_a/f"), "in /1/a")?;
+    write_to(dir.join("dir_1/dir_a/dir_x/f"), "in /1/a/x")?;
+    write_to(dir.join("dir_1/dir_a/dir_y/f"), "in /1/a/y")?;
+    write_to(dir.join("dir_2/dir_a/dir_x/f"), "in /2/a/x")?;
 
     Ok(())
 }
@@ -123,18 +121,48 @@ pub fn repo_fixture() -> eyre::Result<(TempDir, Repo)> {
     Ok((dir, repo))
 }
 
-pub fn write_normalized(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> Result {
-    fs::write(path.as_ref(), data)?;
-    filetime::set_file_times(
-        path,
-        filetime::FileTime::from_unix_time(1042, 12),
-        filetime::FileTime::from_unix_time(1042, 13),
-    )?;
+pub fn write_to(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> Result {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, data)?;
     Ok(())
 }
 
-#[allow(unused)]
-pub const NAME: &str = "Example Name";
+/// Assert that each item in the list is matched by at least one predicate. Predicates cannot be re-used.
+pub fn assert_contains_unordered<Item, List, Preds, P>(list: List, preds: Preds)
+where
+    Item: Clone + std::fmt::Debug,
+    List: IntoIterator<Item = Item> + std::fmt::Debug,
+    Preds: Into<Vec<P>>,
+    P: Fn(&Item) -> bool,
+{
+    let mut preds = preds.into();
+    let list_debug = format!("{:#?}", list);
 
-#[allow(unused)]
+    'list: for item in list {
+        for (i, p) in preds.iter().enumerate() {
+            if p(&item) {
+                preds.remove(i);
+                continue 'list;
+            }
+        }
+        panic!(
+            "No predicate matches item {:?}. Got list {}",
+            item, list_debug
+        );
+    }
+
+    if !preds.is_empty() {
+        panic!(
+            "{} predicates unmatched. Got list {}",
+            preds.len(),
+            list_debug
+        );
+    }
+}
+
+pub const NAME: &str = "Example Name";
 pub const EMAIL: &str = "example@example.com";
+pub const MSG: &str = "Example commit message\n\nSome details.\n";

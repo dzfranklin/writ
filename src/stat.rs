@@ -1,7 +1,23 @@
-use std::{fs, os::linux::fs::MetadataExt, os::unix::fs::PermissionsExt, time::SystemTime};
+use std::{
+    convert::TryInto,
+    fs,
+    os::linux::fs::MetadataExt,
+    time::{Duration, SystemTime},
+};
 
 use bstr::{BStr, ByteSlice};
-use tracing::warn;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Stat {
+    pub ctime: SystemTime,
+    pub mtime: SystemTime,
+    pub dev: u32,
+    pub ino: u32,
+    pub mode: Mode,
+    pub uid: u32,
+    pub gid: u32,
+    pub size: u32,
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Mode {
@@ -9,8 +25,60 @@ pub enum Mode {
     Executable,
 }
 
-#[derive(Debug, Clone)]
-pub struct Stat(fs::Metadata);
+impl Stat {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::similar_names
+    )]
+    pub fn from(meta: &fs::Metadata) -> Self {
+        Self {
+            ctime: Self::systemtime_from_epoch(meta.st_ctime() as u32, meta.st_ctime_nsec() as u32),
+            mtime: Self::systemtime_from_epoch(meta.st_mtime() as u32, meta.st_mtime_nsec() as u32),
+            dev: meta.st_dev() as u32,
+            ino: meta.st_ino() as u32,
+            mode: Mode::from_u32(meta.st_mode()),
+            uid: meta.st_uid(),
+            gid: meta.st_gid(),
+            size: meta.st_size() as u32,
+        }
+    }
+
+    pub fn zeroed() -> Self {
+        Self {
+            ctime: SystemTime::UNIX_EPOCH,
+            mtime: SystemTime::UNIX_EPOCH,
+            dev: 0,
+            ino: 0,
+            mode: Mode::Regular,
+            uid: 0,
+            gid: 0,
+            size: 0,
+        }
+    }
+
+    pub fn ctime_epoch(&self) -> (u32, u32) {
+        Self::systemtime_to_epoch(self.ctime)
+    }
+
+    pub fn mtime_epoch(&self) -> (u32, u32) {
+        Self::systemtime_to_epoch(self.mtime)
+    }
+
+    fn systemtime_to_epoch(time: SystemTime) -> (u32, u32) {
+        let dur = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Not before epoch");
+
+        let secs: u32 = dur.as_secs().try_into().expect("Time overflowed");
+
+        (secs, dur.subsec_nanos())
+    }
+
+    pub(crate) fn systemtime_from_epoch(secs: u32, nanos: u32) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::new(u64::from(secs), nanos)
+    }
+}
 
 impl Mode {
     const EXECUTABLE: u32 = 0o10_07_55;
@@ -32,63 +100,11 @@ impl Mode {
 
     /// Unrecognized modes are considered [`Self::Regular`]
     pub fn from_u32(val: u32) -> Self {
-        match val {
-            Self::REGULAR => Self::Regular,
-            Self::EXECUTABLE => Self::Executable,
-            val => {
-                warn!("Assuming unrecognized mode to be Mode::Regular: {:#o}", val);
-                Self::Regular
-            }
-        }
-    }
-}
-
-impl Stat {
-    pub fn new(meta: fs::Metadata) -> Self {
-        Self(meta)
-    }
-
-    pub fn mode(&self) -> Mode {
-        if self.is_executable() {
-            Mode::Executable
+        let is_executable = val & 0o111 != 0;
+        if is_executable {
+            Self::Executable
         } else {
-            Mode::Regular
+            Self::Regular
         }
-    }
-
-    pub fn ctime(&self) -> SystemTime {
-        self.0.created().expect("OS supports ctime")
-    }
-
-    pub fn mtime(&self) -> SystemTime {
-        self.0.modified().expect("OS supports mtime")
-    }
-
-    #[allow(clippy::clippy::cast_possible_truncation)]
-    pub fn dev(&self) -> u32 {
-        self.0.st_dev() as _
-    }
-
-    #[allow(clippy::clippy::cast_possible_truncation)]
-    pub fn ino(&self) -> u32 {
-        self.0.st_ino() as _
-    }
-
-    pub fn uid(&self) -> u32 {
-        self.0.st_uid() as _
-    }
-
-    pub fn gid(&self) -> u32 {
-        self.0.st_gid()
-    }
-
-    #[allow(clippy::clippy::cast_possible_truncation)]
-    pub fn size(&self) -> u32 {
-        self.0.st_size() as _
-    }
-
-    pub fn is_executable(&self) -> bool {
-        let permissions = self.0.permissions();
-        self.0.is_file() && permissions.mode() & 0o111 != 0
     }
 }
