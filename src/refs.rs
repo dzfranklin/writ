@@ -1,6 +1,6 @@
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::{locked_file, LockedFile, Oid};
+use crate::{locked_file, object::ParseOidError, LockedFile, Oid};
 use std::{
     ffi::OsStr,
     fs,
@@ -40,15 +40,19 @@ impl Refs {
         self.update_ref(Self::HEAD.as_bstr(), oid)
     }
 
-    pub fn read_ref(&self, ref_name: &BStr) -> Result<Option<BString>, ReadError> {
+    pub fn read_ref(&self, ref_name: &BStr) -> Result<Option<Oid>, ReadError> {
         match fs::read(self.ref_path(ref_name)) {
-            Ok(bytes) => Ok(Some(bytes.trim().into())),
+            Ok(bytes) => {
+                let oid = bytes.trim();
+                let oid = Oid::parse(oid).map_err(|e| ReadError::Parse(ref_name.to_owned(), e))?;
+                Ok(Some(oid))
+            }
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(ReadError(ref_name.to_owned(), err)),
+            Err(err) => Err(ReadError::Io(ref_name.to_owned(), err)),
         }
     }
 
-    pub fn read_head(&self) -> Result<Option<BString>, ReadError> {
+    pub fn head(&self) -> Result<Option<Oid>, ReadError> {
         self.read_ref(Self::HEAD.as_bstr())
     }
 
@@ -57,9 +61,13 @@ impl Refs {
     }
 }
 
-/// Failed to read ref {0}
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
-pub struct ReadError(BString, #[source] io::Error);
+pub enum ReadError {
+    /// Io error reading ref {0}
+    Io(BString, #[source] io::Error),
+    /// Failed to parse Oid of ref {0}
+    Parse(BString, #[source] ParseOidError),
+}
 
 #[derive(Debug, displaydoc::Display, thiserror::Error)]
 pub enum UpdateError {

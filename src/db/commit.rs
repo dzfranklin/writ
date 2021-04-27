@@ -1,24 +1,34 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    io::{self, BufRead},
+};
 
 use bstr::{BString, ByteSlice};
+use tracing::warn;
 
-use crate::{db, Db, Object, Oid};
+use super::{author, Author};
+use crate::{db, object::ParseOidError, Db, Object, Oid};
 
 #[derive(Debug, Clone)]
 pub struct Commit {
-    parent: Option<Oid>,
-    tree: Oid,
-    author: db::Author,
-    msg: String,
+    pub parent: Option<Oid>,
+    pub tree: Oid,
+    pub author: db::Author,
+    pub msg: BString,
 }
 
 impl Commit {
-    pub fn new(parent: Option<Oid>, tree: Oid, author: db::Author, msg: String) -> Self {
+    pub fn new(
+        parent: Option<Oid>,
+        tree: Oid,
+        author: db::Author,
+        msg: impl Into<BString>,
+    ) -> Self {
         Self {
             parent,
             tree,
             author,
-            msg,
+            msg: msg.into(),
         }
     }
 }
@@ -47,4 +57,81 @@ impl Object for Commit {
 
         db.store::<Self>(ser.as_bstr())
     }
+
+    type DeserializeError = DeserializeError;
+
+    fn deserialize(
+        _oid: Oid,
+        _len: usize,
+        mut data: impl BufRead,
+    ) -> Result<Self, Self::DeserializeError> {
+        let mut parent = None;
+        let mut tree = None;
+        let mut author = None;
+
+        let mut line = BString::from(Vec::new());
+        loop {
+            line.clear();
+            let bytes_read = data.read_until(b'\n', &mut line)?;
+            if bytes_read == 0 {
+                return Err(DeserializeError::UnexpectedHeadersEnd);
+            } else if bytes_read == 1 {
+                break;
+            }
+
+            let i = line.find(b" ").ok_or(DeserializeError::MalformedHeader)?;
+            let (key, value) = line.split_at(i);
+            let value = &value[1..value.len() - 1];
+
+            match key {
+                b"parent" => {
+                    let oid = Oid::parse(value).map_err(DeserializeError::ParseParent)?;
+                    parent = Some(oid);
+                }
+                b"tree" => {
+                    let oid = Oid::parse(value).map_err(DeserializeError::ParseTree)?;
+                    tree = Some(oid);
+                }
+                b"author" => author = Some(Author::parse(value.as_bstr())?),
+                _ => warn!(
+                    key = ?key.to_str_lossy(),
+                    value = ?value.to_str_lossy(),
+                    "Unrecognized commit header"
+                ),
+            }
+        }
+
+        let tree = tree.ok_or(DeserializeError::MissingTree)?;
+        let author = author.ok_or(DeserializeError::MissingAuthor)?;
+
+        let mut msg = BString::from(Vec::new());
+        data.read_to_end(&mut msg)?;
+
+        Ok(Self {
+            parent,
+            tree,
+            author,
+            msg,
+        })
+    }
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub enum DeserializeError {
+    /// IO error
+    Io(#[from] io::Error),
+    /// Headers ended unexpectedly
+    UnexpectedHeadersEnd,
+    /// Malformed header
+    MalformedHeader,
+    /// Failed to parse oid of parent
+    ParseParent(#[source] ParseOidError),
+    /// Failed to parse oid of tree
+    ParseTree(#[source] ParseOidError),
+    /// Failed to parse author header
+    ParseAuthor(#[from] author::ParseError),
+    /// Header tree not present
+    MissingTree,
+    /// Header author not present
+    MissingAuthor,
 }

@@ -25,6 +25,7 @@ pub enum Opt {
         #[structopt(long, short)]
         message: String,
     },
+    ShowHead,
 }
 
 fn main() -> eyre::Result<()> {
@@ -55,6 +56,7 @@ fn main() -> eyre::Result<()> {
             email,
             message,
         } => Repo::for_current_dir()?.commit(name, email, message)?,
+        Opt::ShowHead => Repo::for_current_dir()?.show_head()?,
     }
 
     Ok(())

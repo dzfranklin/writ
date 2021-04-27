@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fmt,
     os::unix::prelude::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
@@ -44,6 +44,10 @@ impl WsPath {
         Self(path)
     }
 
+    pub fn root() -> Self {
+        Self(PathBuf::new())
+    }
+
     pub fn as_bstr(&self) -> &BStr {
         self.0.as_os_str().as_bytes().as_bstr()
     }
@@ -86,6 +90,15 @@ impl WsPath {
 
     pub fn iter_parents(&self) -> Parents {
         Parents::new(self)
+    }
+
+    pub fn join(&self, path: impl AsRef<Path>) -> Self {
+        Self(self.0.join(path))
+    }
+
+    pub fn join_bytes(&self, path: &BStr) -> Self {
+        let path = OsStr::from_bytes(path.as_bytes());
+        Self(self.0.join(path))
     }
 }
 

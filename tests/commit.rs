@@ -6,14 +6,12 @@ use support::*;
 fn can_basic_commit() -> Result {
     init();
 
-    let msg = "Message";
-
     let (actual, mut repo) = repo_fixture()?;
     let actual = actual.path();
 
     write_to(actual.join("file.txt"), "File contents\n")?;
     repo.add(vec!["file.txt"])?;
-    repo.commit(NAME.to_string(), EMAIL.to_string(), msg.to_string())?;
+    repo.commit(NAME.to_string(), EMAIL.to_string(), MSG.to_string())?;
 
     let expected = tempdir()?;
     let expected = expected.path();
@@ -26,7 +24,7 @@ fn can_basic_commit() -> Result {
         git config user.email $EMAIL;
         git config --global gc.auto 0;
         git add file.txt;
-        git commit -m $msg;
+        git commit -m $MSG;
     })?;
 
     let actual = all_files(actual.join(".git/objects"))?;

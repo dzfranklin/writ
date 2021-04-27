@@ -20,6 +20,8 @@ byteorder = "1.4.3"
 ring = "0.16.20"
 eyre = "0.6.5"
 color-eyre = "0.5.11"
+regex = "1.4.6"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 insta = { version = "1.7.1", features = ["backtrace"] }

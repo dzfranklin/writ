@@ -44,15 +44,11 @@ impl Entry {
     }
 
     pub fn key(&self) -> &BStr {
-        self.path().as_ref()
-    }
-
-    pub fn path(&self) -> &WsPath {
-        &self.path
+        self.path.as_ref()
     }
 
     pub fn filename(&self) -> &BStr {
-        self.path().file_name().as_bstr()
+        self.path.file_name().as_bstr()
     }
 
     pub fn mode(&self) -> stat::Mode {
@@ -134,7 +130,7 @@ impl Entry {
         writer.write_all(self.oid.as_bytes())?; // offset 60
         writer.write_u16::<NetworkEndian>(self.flags.as_u16())?; // offset 62
 
-        let path = self.path().as_bstr();
+        let path = self.path.as_bstr();
         writer.write_all(path)?;
         for _ in 0..Self::padding_size(path) {
             writer.write_all(b"\0")?;
@@ -189,9 +185,12 @@ impl Entry {
             }
             path.push(byte);
         }
+        let padding_size = Self::padding_size(&path);
         // we already read one null byte
-        for _ in 0..Self::padding_size(&path) - 1 {
-            reader.read_u8()?;
+        if padding_size > 1 {
+            for _ in 0..padding_size - 1 {
+                reader.read_u8()?;
+            }
         }
         let path = WsPath::new_unchecked_bytes(path);
 

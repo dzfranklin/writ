@@ -4,6 +4,7 @@ use std::{
     os::linux::fs::MetadataExt,
     time::{Duration, SystemTime},
 };
+use tracing::warn;
 
 use bstr::{BStr, ByteSlice};
 
@@ -84,10 +85,13 @@ impl Mode {
     const EXECUTABLE: u32 = 0o10_07_55;
     const REGULAR: u32 = 0o10_06_44;
 
-    pub fn as_base10(self) -> &'static BStr {
+    const REGULAR_S: &'static [u8] = b"100644";
+    const EXECUTABLE_S: &'static [u8] = b"100755";
+
+    pub fn as_base8(self) -> &'static BStr {
         match self {
-            Self::Regular => b"100644".as_bstr(),
-            Self::Executable => b"100755".as_bstr(),
+            Self::Regular => Self::REGULAR_S.as_bstr(),
+            Self::Executable => Self::EXECUTABLE_S.as_bstr(),
         }
     }
 
@@ -98,13 +102,24 @@ impl Mode {
         }
     }
 
-    /// Unrecognized modes are considered [`Self::Regular`]
     pub fn from_u32(val: u32) -> Self {
         let is_executable = val & 0o111 != 0;
         if is_executable {
             Self::Executable
         } else {
             Self::Regular
+        }
+    }
+
+    /// Unrecognized modes are considered [`Self::Regular`]
+    pub fn from_base8(bytes: &BStr) -> Self {
+        match bytes.as_bytes() {
+            Self::REGULAR_S => Self::Regular,
+            Self::EXECUTABLE_S => Self::Executable,
+            _ => {
+                warn!("Assuming unrecognized mode {} to be regular", bytes);
+                Self::Regular
+            }
         }
     }
 }

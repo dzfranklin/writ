@@ -1,3 +1,6 @@
+pub mod entry;
+pub use entry::Entry;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::TryInto,
@@ -7,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{locked_file, Entry, LockedFile, Stat, WithDigest, WsPath};
+use crate::{locked_file, LockedFile, Stat, WithDigest, WsPath};
 use bstr::BString;
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
@@ -141,16 +144,16 @@ impl<'i> IndexMut<'i> {
 
     pub fn add(&mut self, entry: Entry) {
         Self::populate_parents_for(&mut self.parents, &entry);
-        self.discard_conflicts_with(&entry.path());
+        self.discard_conflicts_with(&entry.path);
         self.index.entries.insert(entry.key().to_owned(), entry);
     }
 
     fn populate_parents_for(parents: &mut ParentsMap, entry: &Entry) {
-        for parent in entry.path().iter_parents() {
+        for parent in entry.path.iter_parents() {
             parents
                 .entry(parent)
                 .or_insert_with(BTreeSet::new)
-                .insert(entry.path().to_bstring());
+                .insert(entry.path.to_bstring());
         }
     }
 
@@ -315,7 +318,7 @@ mod tests {
     fn index_fixture() -> eyre::Result<(tempfile::NamedTempFile, Index)> {
         let file = tempfile::NamedTempFile::new()?;
         let index = Index {
-            entries: BTreeMap::new(),
+            entries: BTreeMap::<BString, Entry>::new(),
             path: file.path().to_owned(),
         };
 
@@ -354,7 +357,7 @@ mod tests {
 
         let actual = index
             .entries()
-            .map(|e| e.path().to_path_buf())
+            .map(|e| e.path.to_path_buf())
             .collect::<Vec<_>>();
 
         let expected: Vec<PathBuf> = vec!["alice.txt/nested.txt".into(), "bob.txt".into()];
@@ -378,7 +381,7 @@ mod tests {
 
         let actual = index
             .entries()
-            .map(|e| e.path().to_path_buf())
+            .map(|e| e.path.to_path_buf())
             .collect::<Vec<_>>();
 
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
@@ -403,7 +406,7 @@ mod tests {
 
         let actual = index
             .entries()
-            .map(|e| e.path().to_path_buf())
+            .map(|e| e.path.to_path_buf())
             .collect::<Vec<_>>();
 
         let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];

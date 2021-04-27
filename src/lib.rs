@@ -1,4 +1,4 @@
-#![feature(path_try_exists, with_options)]
+#![feature(path_try_exists, with_options, associated_type_defaults)]
 // TODO: Warn clippy::cargos
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
@@ -8,7 +8,6 @@
 )]
 
 pub mod db;
-pub mod entry;
 pub mod index;
 pub mod locked_file;
 pub mod object;
@@ -20,7 +19,6 @@ pub mod with_digest;
 pub mod ws;
 
 pub use db::Db;
-pub use entry::Entry;
 pub use index::{Index, IndexMut};
 pub use locked_file::LockedFile;
 pub use object::{Object, Oid};

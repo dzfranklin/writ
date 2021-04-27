@@ -6,14 +6,17 @@ use std::{
 };
 
 use crate::{
-    db,
-    entry::{self, StatusChatty},
-    index, object, refs,
+    db::{self, Commit, Tree},
+    index::{
+        self,
+        entry::{self, Entry, StatusChatty},
+    },
+    object, refs,
     ws::{self, ListFilesError, ReadFileError, StatFileError},
-    Db, Entry, FileStatus, Index, Object, Oid, Refs, Status, Workspace, WsPath,
+    Db, FileStatus, Index, Object, Oid, Refs, Status, Workspace, WsPath,
 };
 use bstr::BString;
-use chrono::Local;
+use chrono::{Local, Utc};
 use tracing::{debug, instrument};
 
 #[derive(Debug, Clone)]
@@ -143,13 +146,14 @@ impl Repo {
         let refs = &self.refs;
         let index = &self.index;
 
-        let entries: Vec<_> = index.entries().map(Clone::clone).collect();
+        let entries: Vec<db::tree::Entry> =
+            index.entries().map(|entry| entry.clone().into()).collect();
 
         let root = db::Tree::from(entries);
         let root_oid = root.store(&db)?;
 
-        let parent = refs.read_head()?.map(Oid::parse).transpose()?;
-        let author = db::Author::new(name, email, Local::now());
+        let parent = refs.head()?;
+        let author = db::Author::new_local(name, email, Local::now());
         let commit = db::Commit::new(parent, root_oid, author, msg);
         let commit_oid = commit.store(&db)?;
         refs.update_head(&commit_oid)?;
@@ -174,7 +178,7 @@ impl Repo {
 
         for entry in self.index.entries() {
             if !status.contains_key(entry.key()) {
-                let value = FileStatus::new(entry.path().clone(), Status::Deleted);
+                let value = FileStatus::new(entry.path.clone(), Status::Deleted);
                 status.insert(entry.key().to_owned(), value);
             }
         }
@@ -205,6 +209,24 @@ impl Repo {
         };
 
         Ok(FileStatus::new(path, status))
+    }
+
+    pub fn show_head(&self) -> eyre::Result<()> {
+        let head = self.refs.head()?.ok_or_else(|| eyre::eyre!("No HEAD"))?;
+        let commit = self.db.load::<Commit>(head)?;
+        let mut tree = self.db.load::<Tree>(commit.tree)?;
+        self.print_tree(&mut tree)?;
+        Ok(())
+    }
+
+    fn print_tree(&self, tree: &mut db::Tree) -> eyre::Result<()> {
+        for key in tree.keys() {
+            match tree.load_mut(key, &self.db)? {
+                db::tree::LoadedNode::Entry(entry) => println!("{:?}", entry),
+                db::tree::LoadedNode::Tree(tree) => self.print_tree(tree)?,
+            }
+        }
+        Ok(())
     }
 }
 

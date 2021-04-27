@@ -191,7 +191,7 @@ macro_rules! pause_dbg {
                 .expect("Failed to write to stderr");
 
             stderr
-                .write_all(b"\n\Press enter to continue\n")
+                .write_all(b"\nPress enter to continue\n")
                 .expect("Failed to write to stderr");
         }
 
