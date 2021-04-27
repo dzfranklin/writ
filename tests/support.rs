@@ -163,6 +163,45 @@ where
     }
 }
 
+#[macro_export]
+macro_rules! pause_dbg {
+    ($($expr:expr),*) => {{
+        use std::io::{self, Write};
+
+        let mut msg = String::new();
+        $({
+            let name = stringify!($expr);
+            let value = $expr;
+            msg.push_str(&format!("\n{n}={v:?}", n=name, v=value));
+        })*
+
+        {
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+
+            let file = file!();
+            let line = line!();
+
+            stderr
+                .write_all(format!("\npause_dbg at {}:{}\n", file, line).as_bytes())
+                .expect("Failed to write to stderr");
+
+            stderr
+                .write_all(msg.as_bytes())
+                .expect("Failed to write to stderr");
+
+            stderr
+                .write_all(b"\n\Press enter to continue\n")
+                .expect("Failed to write to stderr");
+        }
+
+        let mut line = String::new();
+        io::stdin()
+            .read_line(&mut line)
+            .expect("Failed to read from stdin");
+    }};
+}
+
 pub const NAME: &str = "Example Name";
 pub const EMAIL: &str = "example@example.com";
 pub const MSG: &str = "Example commit message\n\nSome details.\n";
