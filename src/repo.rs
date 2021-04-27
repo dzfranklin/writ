@@ -53,11 +53,11 @@ impl Repo {
 
     pub fn init(workspace: impl Into<PathBuf>) -> Result<Self, InitError> {
         let workspace_dir = workspace.into();
-        let workspace_dir = workspace_dir
-            .canonicalize()
-            .map_err(|e| InitError::Open(workspace_dir, e))?;
-        let git_dir = workspace_dir.join(".git");
 
+        fs::create_dir_all(&workspace_dir)
+            .map_err(|e| InitError::CreateWorkspace(workspace_dir.clone(), e))?;
+
+        let git_dir = workspace_dir.join(".git");
         if git_dir
             .try_exists()
             .map_err(|e| InitError::Open(git_dir.clone(), e))?
