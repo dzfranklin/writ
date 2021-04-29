@@ -23,27 +23,42 @@ use std::{
     path::PathBuf,
 };
 
+use self::cache::Cache;
 use crate::WsPath;
 
-#[derive(Debug, Clone)]
+/// Note: Cloning clears the cache
+#[derive(Debug)]
 pub struct Db {
     path: PathBuf,
+    cache: Cache,
 }
 
 impl Db {
     pub fn new<P: Into<PathBuf>>(git_dir: P) -> Self {
         Self {
             path: git_dir.into().join("objects"),
+            cache: Cache::new(),
         }
     }
 
-    pub fn load<O: Object>(&self, oid: Oid<O>) -> Result<O, LoadError<O>> {
+    pub(super) fn cache<O: Object + 'static>(&mut self, oid: Oid<O>, object: O) {
+        self.cache.insert(oid, object);
+    }
+
+    pub fn load<O: Object>(&mut self, oid: Oid<O>) -> Result<O, LoadError<O>> {
+        if let Some(cached) = self.cache.get(&oid) {
+            return Ok(cached.clone());
+        }
+
         let (len, bytes) = self.load_bytes(O::TYPE, &oid)?;
-        O::deserialize(oid, len, bytes).map_err(|e| LoadError::Deserialize(oid, e))
+        let object = O::deserialize(oid, len, bytes).map_err(|e| LoadError::Deserialize(oid, e))?;
+        self.cache.insert(oid, object.clone());
+
+        Ok(object)
     }
 
     pub fn load_tree_file(
-        &self,
+        &mut self,
         mut tree: Oid<Tree>,
         path: &WsPath,
     ) -> Result<Option<tree::FileNode>, LoadError<Tree>> {
@@ -65,7 +80,7 @@ impl Db {
     }
 
     pub fn load_tree_files(
-        &self,
+        &mut self,
         root: &WsPath,
         tree: Oid<Tree>,
     ) -> Result<BTreeMap<WsPath, tree::FileNode>, LoadError<Tree>> {
@@ -75,7 +90,7 @@ impl Db {
     }
 
     fn load_all_tree_files_into(
-        &self,
+        &mut self,
         files: &mut BTreeMap<WsPath, tree::FileNode>,
         root: &WsPath,
         tree: Oid<Tree>,
@@ -96,6 +111,7 @@ impl Db {
         Ok(())
     }
 
+    /// Doesn't cache
     fn load_bytes<O: Object>(
         &self,
         expected_type: &[u8],
@@ -143,6 +159,7 @@ impl Db {
         Ok((len, bytes))
     }
 
+    /// Doesn't cache
     pub fn store_bytes<OB: ObjectBuilder>(&self, content: &[u8]) -> StoreResult<OB::Object> {
         fn helper<O: Object>(db: &Db, oid: &Oid<O>, bytes: &[u8]) -> io::Result<()> {
             let path = db.oid_path(oid);
@@ -203,6 +220,12 @@ impl Db {
         let dir = self.path.join(&oid[0..2]);
         let name = &oid[2..];
         dir.join(name)
+    }
+}
+
+impl Clone for Db {
+    fn clone(&self) -> Self {
+        Self::new(&self.path)
     }
 }
 

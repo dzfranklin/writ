@@ -294,7 +294,7 @@ impl Repo {
         Ok(status)
     }
 
-    pub fn show_head(&self) -> eyre::Result<()> {
+    pub fn show_head(&mut self) -> eyre::Result<()> {
         let head = self.refs.head()?.ok_or_else(|| eyre::eyre!("No HEAD"))?;
         let commit = self.db.load::<Commit>(head)?;
         eprintln!("HEAD: {}\n", head);
@@ -302,7 +302,7 @@ impl Repo {
         Ok(())
     }
 
-    fn print_tree(&self, tree: Oid<Tree>, level: usize) -> eyre::Result<()> {
+    fn print_tree(&mut self, tree: Oid<Tree>, level: usize) -> eyre::Result<()> {
         let tree = self.db.load::<Tree>(tree)?;
         let level_prefix = " ".repeat(level * 4);
         for node in tree.direct_children() {
