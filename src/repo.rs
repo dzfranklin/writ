@@ -15,7 +15,6 @@ use crate::{
     ws::{self, ListFilesError, ReadFileError, StatFileError},
     Db, FileStatus, Index, IndexMut, ObjectBuilder, Oid, Refs, Status, Workspace, WsPath,
 };
-use bstr::BString;
 use chrono::Local;
 use tracing::{debug, instrument};
 
@@ -188,30 +187,21 @@ impl Repo {
         for path in self.workspace.list_files()? {
             let ws_status = Self::workspace_status_of(work, &mut index, &path)?;
             let index_status = Self::index_status_of(&index, &head, &path)?;
-            debug!(
-                "{} in workspace. ws_status: {:?}, index_status: {:?}",
-                path, ws_status, index_status
-            );
+            debug!("{path} in workspace, so ws: {ws_status:?}, idx: {index_status:?}");
             ws_statuses.insert(path.clone(), ws_status);
             index_statuses.insert(path, index_status);
         }
 
         for entry in index.entries() {
             if !ws_statuses.contains_key(&entry.path) {
-                debug!(
-                    "{} in index but not workspace, so ws_status: Status::Deleted",
-                    entry.path
-                );
+                debug!("{} in idx but not ws, so ws: Status::Deleted", entry.path);
                 ws_statuses.insert(entry.path.clone(), Status::Deleted);
             }
         }
 
         for (path, _file) in head {
             if !index.is_tracked_file(&path) {
-                debug!(
-                    "{} in head but not index, so index_status: Status::Deleted",
-                    path
-                );
+                debug!("{path} in head but not idx, so idx: Status::Deleted",);
                 index_statuses.insert(path, Status::Deleted);
             }
         }

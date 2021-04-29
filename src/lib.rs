@@ -4,7 +4,8 @@
     associated_type_defaults,
     map_first_last,
     const_fn,
-    debug_non_exhaustive
+    debug_non_exhaustive,
+    format_args_capture
 )]
 // TODO: Warn clippy::cargos
 #![warn(clippy::all, clippy::pedantic)]
