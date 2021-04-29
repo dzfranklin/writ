@@ -6,17 +6,17 @@ use std::{
 };
 
 use crate::{
-    db::{self, Commit, Tree},
+    db::{self, object, Blob, Commit, Tree},
     index::{
         self,
         entry::{self, Entry, StatusChatty},
     },
-    object, refs,
+    refs,
     ws::{self, ListFilesError, ReadFileError, StatFileError},
-    Db, FileStatus, Index, Object, Oid, Refs, Status, Workspace, WsPath,
+    Db, FileStatus, Index, ObjectBuilder, Oid, Refs, Status, Workspace, WsPath,
 };
 use bstr::BString;
-use chrono::{Local, Utc};
+use chrono::Local;
 use tracing::{debug, instrument};
 
 #[derive(Debug, Clone)]
@@ -111,8 +111,7 @@ impl Repo {
             let data = workspace.read_file(&file)?;
             let stat = workspace.stat(&file)?;
 
-            let blob = db::Blob::new(data);
-            let oid = blob.store(&db)?;
+            let oid = db::blob::Builder::new(data).store(&db)?;
             let entry = Entry::new(file, oid, stat);
 
             debug!("Adding {:?}", entry);
@@ -146,17 +145,18 @@ impl Repo {
         let refs = &self.refs;
         let index = &self.index;
 
-        let entries: Vec<db::tree::Entry> =
-            index.entries().map(|entry| entry.clone().into()).collect();
+        let entries = index.entries().map(|entry| db::tree::EntryBuilder {
+            oid: entry.oid,
+            path: entry.path.clone(),
+            mode: entry.mode(),
+        });
 
-        let root = db::Tree::from(entries);
-        let root_oid = root.store(&db)?;
+        let root = db::tree::Builder::new().entries(entries).store(&db)?;
 
         let parent = refs.head()?;
         let author = db::Author::new_local(name, email, Local::now());
-        let commit = db::Commit::new(parent, root_oid, author, msg);
-        let commit_oid = commit.store(&db)?;
-        refs.update_head(&commit_oid)?;
+        let commit = db::commit::Builder::new(parent, root, author, msg).store(db)?;
+        refs.update_head(&commit)?;
 
         Ok(())
     }
@@ -214,16 +214,23 @@ impl Repo {
     pub fn show_head(&self) -> eyre::Result<()> {
         let head = self.refs.head()?.ok_or_else(|| eyre::eyre!("No HEAD"))?;
         let commit = self.db.load::<Commit>(head)?;
-        let mut tree = self.db.load::<Tree>(commit.tree)?;
-        self.print_tree(&mut tree)?;
+        eprintln!("HEAD: {}\n", head);
+        self.print_tree(commit.tree, 0)?;
         Ok(())
     }
 
-    fn print_tree(&self, tree: &mut db::Tree) -> eyre::Result<()> {
-        for key in tree.keys() {
-            match tree.load_mut(key, &self.db)? {
-                db::tree::LoadedNode::Entry(entry) => println!("{:?}", entry),
-                db::tree::LoadedNode::Tree(tree) => self.print_tree(tree)?,
+    fn print_tree(&self, tree: Oid<Tree>, level: usize) -> eyre::Result<()> {
+        let tree = self.db.load::<Tree>(tree)?;
+        let level_prefix = " ".repeat(level * 4);
+        for node in tree.direct_children() {
+            match node {
+                db::tree::Node::File { name, mode, oid } => {
+                    println!("{}{} {} ({:?})", level_prefix, oid, name, mode)
+                }
+                db::tree::Node::Tree { name, oid } => {
+                    println!("{}{} {}/", level_prefix, oid, name);
+                    self.print_tree(*oid, level + 1)?;
+                }
             }
         }
         Ok(())
@@ -275,8 +282,8 @@ pub enum AddError {
     Stat(#[from] StatFileError),
     /// Failed to read file
     Read(#[from] ReadFileError),
-    /// Failed to store blob
-    StoreBlob(#[from] db::StoreError),
+    /// Failed to store file
+    StoreBlob(#[from] db::StoreError<Blob>),
     /// Failed to commit changes to index
     CommitIndex(#[from] index::CommitError),
 }
@@ -287,8 +294,10 @@ pub enum CommitError {
     EmptyMessage,
     /// Failed to load index
     LoadIndex(#[from] index::OpenForModificationsError),
-    /// Failed to store blob
-    StoreBlob(#[from] db::StoreError),
+    /// Failed to store tree
+    StoreTree(#[from] db::StoreError<Tree>),
+    /// Failed to store commit
+    StoreCommit(#[from] db::StoreError<Commit>),
     /// Failed to read ref
     ReadRef(#[from] refs::ReadError),
     /// Failed to parse oid of parent commit

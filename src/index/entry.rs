@@ -4,15 +4,15 @@ use std::{convert::TryInto, fmt, io};
 use tracing::{debug, instrument};
 
 use crate::{
-    db::Blob,
+    db::{object::OID_SIZE, Blob},
     stat::{self, Mode},
     ws::{ReadFileError, StatFileError},
-    Object, Oid, Stat, Workspace, WsPath,
+    Oid, Stat, Workspace, WsPath,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Entry {
-    pub oid: Oid,
+    pub oid: Oid<Blob>,
     pub stat: Stat,
     pub flags: Flags,
     pub path: WsPath,
@@ -33,7 +33,7 @@ impl Entry {
     const BLOCK_SIZE: usize = 8;
     const PATH_OFFSET: usize = 62;
 
-    pub fn new(path: impl Into<WsPath>, oid: Oid, stat: Stat) -> Self {
+    pub fn new(path: impl Into<WsPath>, oid: Oid<Blob>, stat: Stat) -> Self {
         let path = path.into();
         Self {
             oid,
@@ -92,7 +92,7 @@ impl Entry {
         }
 
         let new_data = workspace.read_file(&self.path)?;
-        let new_oid = Blob::compute_oid(new_data.as_bstr());
+        let new_oid = Blob::oid_for_file(new_data.as_bstr());
 
         if self.oid == new_oid {
             debug!("Determined unchanged based on hash of contents");
@@ -170,7 +170,7 @@ impl Entry {
             size,
         };
 
-        let mut oid = [0; Oid::SIZE];
+        let mut oid = [0; OID_SIZE];
         reader.read_exact(&mut oid)?; // offset 60
         let oid = Oid::new(oid);
 

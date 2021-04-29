@@ -1,21 +1,20 @@
 pub mod author;
 pub mod blob;
 pub mod commit;
+pub mod object;
 pub mod tree;
 
 pub use author::Author;
 pub use blob::Blob;
-use byteorder::{NetworkEndian, ReadBytesExt};
 pub use commit::Commit;
+pub use object::{Object, ObjectBuilder, Oid, UntypedOid};
 pub use tree::Tree;
 
-use crate::{Object, Oid};
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BString, ByteSlice};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use tempfile::NamedTempFile;
 
 use std::{
-    convert::TryInto,
     fs::{self, File},
     io::{self, BufRead, BufReader, BufWriter, ErrorKind, Read, Write},
     num::ParseIntError,
@@ -34,55 +33,16 @@ impl Db {
         }
     }
 
-    pub fn store<O: Object>(&self, content: &BStr) -> StoreResult {
-        fn helper(db: &Db, oid: &Oid, prefix: &[u8], content: &[u8]) -> io::Result<()> {
-            let path = db.oid_path(oid);
-
-            if path.exists() {
-                return Ok(());
-            }
-
-            let mut temp = NamedTempFile::new()?;
-
-            {
-                let mut writer = BufWriter::new(&mut temp);
-                let mut writer = ZlibEncoder::new(&mut writer, Compression::default());
-
-                writer.write_all(prefix)?;
-                writer.write_all(content)?;
-            }
-
-            // We use a temp file to get an atomic write
-            temp.flush()?;
-
-            match fs::rename(temp.path(), &path) {
-                Err(err) if err.kind() == ErrorKind::NotFound => {
-                    fs::create_dir(&path.parent().expect("has parent"))?;
-                    fs::rename(temp.path(), &path)?;
-                }
-                Err(err) => return Err(err),
-                Ok(()) => (),
-            }
-
-            Ok(())
-        }
-
-        let oid = O::compute_oid(content);
-        let prefix = O::serialized_prefix(content);
-        helper(self, &oid, &prefix, content).map_err(|e| StoreError(oid, e))?;
-        Ok(oid)
-    }
-
-    pub fn load<O: Object>(&self, oid: Oid) -> Result<O, LoadError<O>> {
+    pub fn load<O: Object>(&self, oid: Oid<O>) -> Result<O, LoadError<O>> {
         let (len, bytes) = self.load_bytes(O::TYPE, &oid)?;
         O::deserialize(oid, len, bytes).map_err(|e| LoadError::Deserialize(oid, e))
     }
 
-    pub(crate) fn load_bytes(
+    fn load_bytes<O: Object>(
         &self,
         expected_type: &[u8],
-        oid: &Oid,
-    ) -> Result<(usize, impl BufRead), LoadBytesError> {
+        oid: &Oid<O>,
+    ) -> Result<(usize, impl BufRead), LoadBytesError<O>> {
         let path = self.oid_path(&oid);
         let file = match File::open(&path) {
             Ok(file) => Ok(file),
@@ -125,7 +85,62 @@ impl Db {
         Ok((len, bytes))
     }
 
-    fn oid_path(&self, oid: &Oid) -> PathBuf {
+    pub fn store_bytes<OB: ObjectBuilder>(&self, content: &[u8]) -> StoreResult<OB::Object> {
+        fn helper<O: Object>(db: &Db, oid: &Oid<O>, bytes: &[u8]) -> io::Result<()> {
+            let path = db.oid_path(oid);
+
+            if path.exists() {
+                return Ok(());
+            }
+
+            let mut temp = NamedTempFile::new()?;
+
+            {
+                let mut writer = BufWriter::new(&mut temp);
+                let mut writer = ZlibEncoder::new(&mut writer, Compression::default());
+                writer.write_all(bytes)?;
+            }
+
+            // We use a temp file to get an atomic write
+            temp.flush()?;
+
+            match fs::rename(temp.path(), &path) {
+                Err(err) if err.kind() == ErrorKind::NotFound => {
+                    fs::create_dir(&path.parent().expect("has parent"))?;
+                    fs::rename(temp.path(), &path)?;
+                }
+                Err(err) => return Err(err),
+                Ok(()) => (),
+            }
+
+            Ok(())
+        }
+
+        let o_type = OB::Object::TYPE;
+
+        let mut bytes = Self::serialized_prefix(o_type, content);
+        bytes.extend_from_slice(content);
+        let oid = Oid::for_serialized_bytes(&bytes);
+
+        helper::<OB::Object>(self, &oid, &bytes).map_err(|e| StoreError(oid, e))?;
+
+        Ok(oid)
+    }
+
+    fn serialized_prefix(o_type: &[u8], serialized: &[u8]) -> Vec<u8> {
+        let size = serialized.len().to_string();
+
+        let mut ser = Vec::with_capacity(o_type.len() + 1 + size.len() + 1);
+
+        ser.extend(o_type);
+        ser.push(b' ');
+        ser.extend(size.as_bytes());
+        ser.push(b'\0');
+
+        ser
+    }
+
+    fn oid_path<O: Object>(&self, oid: &Oid<O>) -> PathBuf {
         let oid = oid.to_hex();
         let dir = self.path.join(&oid[0..2]);
         let name = &oid[2..];
@@ -133,38 +148,38 @@ impl Db {
     }
 }
 
-pub type StoreResult = Result<Oid, StoreError>;
+pub type StoreResult<O> = Result<Oid<O>, StoreError<O>>;
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 /// Failed to store {0:?}
-pub struct StoreError(Oid, #[source] io::Error);
+pub struct StoreError<O: Object>(Oid<O>, #[source] io::Error);
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub enum LoadError<O: Object> {
+pub enum LoadError<O: Object + 'static> {
     /// Failed to load bytes of object {0:?}
-    LoadBytes(#[from] LoadBytesError),
+    LoadBytes(#[from] LoadBytesError<O>),
     /// Failed to deserialize {0:?}
-    Deserialize(Oid, #[source] O::DeserializeError),
+    Deserialize(Oid<O>, #[source] O::DeserializeError),
 }
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub enum LoadBytesError {
+pub enum LoadBytesError<O: Object + 'static> {
     /// {0:?} not found in database
-    NotFound(Oid),
+    NotFound(Oid<O>),
     /// Failed to open the file for {0:?} in the database
-    Open(Oid, #[source] io::Error),
+    Open(Oid<O>, #[source] io::Error),
     /// Failed to read the prefix from the file for {0:?} in the database
-    ReadPrefix(Oid, #[source] io::Error),
+    ReadPrefix(Oid<O>, #[source] io::Error),
     /// Database entry for {0:?} is corrupt
-    Corrupt(Oid),
+    Corrupt(Oid<O>),
     /// Expected oid {oid:?} to have type {expected}, got {actual}
     WrongType {
-        oid: Oid,
+        oid: Oid<O>,
         expected: BString,
         actual: BString,
     },
     /// Failed to parse bytes of length of {0:?} as utf-8
-    ParseLenToBytes(Oid, #[source] bstr::Utf8Error),
+    ParseLenToBytes(Oid<O>, #[source] bstr::Utf8Error),
     /// Failed to parse length of {0:?}
-    ParseLenToInt(Oid, #[source] ParseIntError),
+    ParseLenToInt(Oid<O>, #[source] ParseIntError),
 }

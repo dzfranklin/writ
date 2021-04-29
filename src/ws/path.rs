@@ -60,8 +60,12 @@ impl WsPath {
         &self.0
     }
 
-    pub fn to_path_buf(&self) -> PathBuf {
-        self.0.clone()
+    pub fn into_path_buf(self) -> PathBuf {
+        self.0
+    }
+
+    pub fn as_path_buf(&mut self) -> &mut PathBuf {
+        &mut self.0
     }
 
     /// Panics if self is outside of workspace
@@ -84,21 +88,43 @@ impl WsPath {
         }
     }
 
-    pub fn parent(&self) -> Option<&Path> {
-        self.0.parent()
+    pub fn parent(&self) -> WsPath {
+        self.0
+            .parent()
+            .map_or_else(WsPath::root, |path| WsPath(path.to_owned()))
     }
 
-    pub fn iter_parents(&self) -> Parents {
+    pub fn parents(&self) -> Parents {
         Parents::new(self)
+    }
+
+    pub fn components(&self) -> impl DoubleEndedIterator<Item = &BStr> {
+        self.0
+            .components()
+            .map(|c| c.as_os_str().as_bytes().as_bstr())
+    }
+
+    pub fn parent_components(&self) -> impl DoubleEndedIterator<Item = &BStr> {
+        let mut iter = self.components();
+        iter.next_back();
+        iter
     }
 
     pub fn join(&self, path: impl AsRef<Path>) -> Self {
         Self(self.0.join(path))
     }
 
+    pub fn push(&mut self, path: impl AsRef<Path>) {
+        self.0.push(path)
+    }
+
     pub fn join_bytes(&self, path: &BStr) -> Self {
         let path = OsStr::from_bytes(path.as_bytes());
         Self(self.0.join(path))
+    }
+
+    pub fn strip_prefix(&self, base: &Self) -> Result<Self, std::path::StripPrefixError> {
+        self.0.strip_prefix(&base.0).map(Self::new_unchecked)
     }
 }
 
@@ -178,21 +204,21 @@ pub struct Parents<'p> {
 #[derive(Debug, Clone)]
 struct NonEmptyParents<'p> {
     remaining: std::path::Components<'p>,
-    prefix: PathBuf,
+    prefix: WsPath,
 }
 
 impl<'p> Parents<'p> {
     fn new(path: &'p WsPath) -> Self {
         let inner = path.as_path().parent().map(|parent| NonEmptyParents {
             remaining: parent.components(),
-            prefix: PathBuf::new(),
+            prefix: WsPath::root(),
         });
         Self { inner }
     }
 }
 
 impl<'p> Iterator for Parents<'p> {
-    type Item = BString;
+    type Item = WsPath;
 
     fn next(&mut self) -> Option<Self::Item> {
         let inner = self.inner.as_mut()?;
@@ -200,11 +226,8 @@ impl<'p> Iterator for Parents<'p> {
         if let Some(component) = inner.remaining.next() {
             match component {
                 std::path::Component::Normal(parent) => {
-                    let full = inner.prefix.join(parent).into_os_string().into_vec();
-                    let full = BString::from(full);
-
+                    let full = inner.prefix.join(parent);
                     inner.prefix.push(component);
-
                     Some(full)
                 }
                 _ => panic!("WsPath wasn't normalized. Refusing to continue iterating over parents. Got {:?}, component: {:?}", inner, component),
@@ -224,8 +247,12 @@ mod tests {
     #[test]
     fn parents() {
         let path = WsPath::new_unchecked("foo/bar/baq/buz.txt");
-        let actual = path.iter_parents().collect::<Vec<_>>();
-        let expected = vec!["foo", "foo/bar", "foo/bar/baq"];
+        let actual = path.parents().collect::<Vec<_>>();
+        let expected = vec![
+            WsPath::new_unchecked("foo"),
+            WsPath::new_unchecked("foo/bar"),
+            WsPath::new_unchecked("foo/bar/baq"),
+        ];
         assert_eq!(expected, actual);
     }
 }

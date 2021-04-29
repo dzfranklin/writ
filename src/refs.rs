@@ -1,6 +1,9 @@
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::{locked_file, object::ParseOidError, LockedFile, Oid};
+use crate::{
+    db::{object::ParseOidError, Commit},
+    locked_file, LockedFile, Oid,
+};
 use std::{
     ffi::OsStr,
     fs,
@@ -21,7 +24,7 @@ impl Refs {
         Self { path: path.into() }
     }
 
-    pub fn update_ref(&self, ref_name: &BStr, oid: &Oid) -> Result<(), UpdateError> {
+    pub fn update_ref(&self, ref_name: &BStr, oid: &Oid<Commit>) -> Result<(), UpdateError> {
         let path = self.ref_path(ref_name);
         let mut lock =
             LockedFile::acquire(path).map_err(|e| UpdateError::Lock(ref_name.to_owned(), e))?;
@@ -36,11 +39,11 @@ impl Refs {
         Ok(())
     }
 
-    pub fn update_head(&self, oid: &Oid) -> Result<(), UpdateError> {
+    pub fn update_head(&self, oid: &Oid<Commit>) -> Result<(), UpdateError> {
         self.update_ref(Self::HEAD.as_bstr(), oid)
     }
 
-    pub fn read_ref(&self, ref_name: &BStr) -> Result<Option<Oid>, ReadError> {
+    pub fn read_ref(&self, ref_name: &BStr) -> Result<Option<Oid<Commit>>, ReadError> {
         match fs::read(self.ref_path(ref_name)) {
             Ok(bytes) => {
                 let oid = bytes.trim();
@@ -52,7 +55,7 @@ impl Refs {
         }
     }
 
-    pub fn head(&self) -> Result<Option<Oid>, ReadError> {
+    pub fn head(&self) -> Result<Option<Oid<Commit>>, ReadError> {
         self.read_ref(Self::HEAD.as_bstr())
     }
 

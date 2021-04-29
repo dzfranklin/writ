@@ -3,7 +3,7 @@ use std::{
     io::{self, Write},
     path::PathBuf,
 };
-use tracing::{error, warn};
+use tracing::{error, info};
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 pub enum Error {
@@ -110,7 +110,7 @@ impl Write for LockedFile {
 impl Drop for LockedFile {
     fn drop(&mut self) {
         if self.lock.is_some() {
-            warn!(path=?self.path, "LockedFile never committed, cancelling");
+            info!(path=?self.path, "LockedFile never committed, cancelling");
             if let Err(err) = self._rollback() {
                 error!("Failed to remove lock: {:?}", err);
             }

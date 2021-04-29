@@ -5,9 +5,10 @@ expression: actual
 ---
 {
     "dir_1/dir_2/second_level": Entry {
-        oid: Oid(
-            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-        ),
+        oid: Oid {
+            bytes: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            type: "blob",
+        },
         stat: Stat {
             ctime: SystemTime {
                 tv_sec: 1619319620,
@@ -34,9 +35,10 @@ expression: actual
         ),
     },
     "dir_1/dir_3/second_level": Entry {
-        oid: Oid(
-            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-        ),
+        oid: Oid {
+            bytes: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            type: "blob",
+        },
         stat: Stat {
             ctime: SystemTime {
                 tv_sec: 1619319624,
@@ -63,9 +65,10 @@ expression: actual
         ),
     },
     "top_level": Entry {
-        oid: Oid(
-            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-        ),
+        oid: Oid {
+            bytes: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            type: "blob",
+        },
         stat: Stat {
             ctime: SystemTime {
                 tv_sec: 1619319578,

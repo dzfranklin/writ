@@ -6,62 +6,31 @@ use std::{
 use bstr::{BString, ByteSlice};
 use tracing::warn;
 
-use super::{author, Author};
-use crate::{db, object::ParseOidError, Db, Object, Oid};
+use super::{author, object::ParseOidError, Author, Tree};
+use crate::{db, Db, Object, ObjectBuilder, Oid};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Commit {
-    pub parent: Option<Oid>,
-    pub tree: Oid,
+    pub oid: Oid<Commit>,
+    pub parent: Option<Oid<Commit>>,
+    pub tree: Oid<Tree>,
     pub author: db::Author,
     pub msg: BString,
-}
-
-impl Commit {
-    pub fn new(
-        parent: Option<Oid>,
-        tree: Oid,
-        author: db::Author,
-        msg: impl Into<BString>,
-    ) -> Self {
-        Self {
-            parent,
-            tree,
-            author,
-            msg: msg.into(),
-        }
-    }
 }
 
 impl Object for Commit {
     const TYPE: &'static [u8] = b"commit";
 
-    fn store(&self, db: &Db) -> db::StoreResult {
-        let author = self.author.serialize();
-
-        let parent_line = if let Some(parent) = self.parent.as_ref() {
-            Cow::Owned(format!("\nparent {}", parent.to_hex()))
-        } else {
-            Cow::Borrowed("")
-        };
-
-        let ser = format!(
-            "tree {}{}\nauthor {}\ncommitter {}\n\n{}",
-            self.tree.to_hex(),
-            &parent_line,
-            &author,
-            &author,
-            &self.msg
-        );
-        let ser = BString::from(ser);
-
-        db.store::<Self>(ser.as_bstr())
-    }
-
     type DeserializeError = DeserializeError;
 
+    type Builder = Builder;
+
+    fn oid(&self) -> Oid<Commit> {
+        self.oid
+    }
+
     fn deserialize(
-        _oid: Oid,
+        oid: Oid<Commit>,
         _len: usize,
         mut data: impl BufRead,
     ) -> Result<Self, Self::DeserializeError> {
@@ -108,11 +77,62 @@ impl Object for Commit {
         data.read_to_end(&mut msg)?;
 
         Ok(Self {
+            oid,
             parent,
             tree,
             author,
             msg,
         })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Builder {
+    pub parent: Option<Oid<Commit>>,
+    pub tree: Oid<Tree>,
+    pub author: db::Author,
+    pub msg: BString,
+}
+
+impl Builder {
+    pub fn new(
+        parent: Option<Oid<Commit>>,
+        tree: Oid<Tree>,
+        author: db::Author,
+        msg: impl Into<BString>,
+    ) -> Self {
+        Self {
+            parent,
+            tree,
+            author,
+            msg: msg.into(),
+        }
+    }
+}
+
+impl ObjectBuilder for Builder {
+    type Object = Commit;
+
+    fn store(self, db: &Db) -> db::StoreResult<Commit> {
+        let author = self.author.serialize();
+
+        let parent_line = if let Some(parent) = self.parent.as_ref() {
+            Cow::Owned(format!("\nparent {}", parent.to_hex()))
+        } else {
+            Cow::Borrowed("")
+        };
+
+        let ser = format!(
+            "tree {}{}\nauthor {}\ncommitter {}\n\n{}",
+            self.tree.to_hex(),
+            &parent_line,
+            &author,
+            &author,
+            &self.msg
+        );
+        let ser = BString::from(ser);
+
+        db.store_bytes::<Self>(ser.as_bstr())
     }
 }
 

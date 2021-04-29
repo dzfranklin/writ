@@ -1,0 +1,111 @@
+---
+source: src/db/tree.rs
+expression: builder
+
+---
+Builder {
+    trees: [
+        Some(
+            {
+                "dir_1": Tree(
+                    1,
+                ),
+                "dir_2": Tree(
+                    2,
+                ),
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "dir_a": Tree(
+                    5,
+                ),
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+                "f2": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "dir_a": Tree(
+                    3,
+                ),
+            },
+        ),
+        Some(
+            {
+                "dir_x": Tree(
+                    4,
+                ),
+            },
+        ),
+        Some(
+            {
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "dir_x": Tree(
+                    6,
+                ),
+                "dir_y": Tree(
+                    7,
+                ),
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "f": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+    ],
+}

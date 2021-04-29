@@ -119,7 +119,7 @@ impl Index {
 type ParentsMap = BTreeMap<BString, BTreeSet<BString>>;
 
 #[derive(Debug)]
-#[allow(clippy::pedantic)]
+#[allow(clippy::module_name_repetitions)]
 pub struct IndexMut<'i> {
     index: &'i mut Index,
     parents: ParentsMap,
@@ -149,9 +149,9 @@ impl<'i> IndexMut<'i> {
     }
 
     fn populate_parents_for(parents: &mut ParentsMap, entry: &Entry) {
-        for parent in entry.path.iter_parents() {
+        for parent in entry.path.parents() {
             parents
-                .entry(parent)
+                .entry(parent.as_bstr().to_owned())
                 .or_insert_with(BTreeSet::new)
                 .insert(entry.path.to_bstring());
         }
@@ -159,8 +159,8 @@ impl<'i> IndexMut<'i> {
 
     fn discard_conflicts_with(&mut self, path: &WsPath) {
         // If the new entry is lib/index/foo, remove lib and index.
-        for parent in path.iter_parents() {
-            self.index.entries.remove(&parent);
+        for parent in path.parents() {
+            self.index.entries.remove(parent.as_bstr());
         }
 
         // If the new entry is lib, remove lib/index/foo and lib/index
@@ -195,11 +195,11 @@ impl<'i> IndexMut<'i> {
 
     pub fn remove(&mut self, path: &WsPath) -> Option<Entry> {
         if let Some(entry) = self.index.entries.remove(path.as_bstr()) {
-            for parent in path.iter_parents() {
-                if let Some(children) = self.parents.get_mut(&parent) {
+            for parent in path.parents() {
+                if let Some(children) = self.parents.get_mut(parent.as_bstr()) {
                     children.remove(path.as_bstr());
                     if children.is_empty() {
-                        self.parents.remove(&parent);
+                        self.parents.remove(parent.as_bstr());
                     }
                 }
             }
@@ -355,12 +355,12 @@ mod tests {
 
         index.add(entry_fixture("alice.txt/nested.txt"));
 
-        let actual = index
-            .entries()
-            .map(|e| e.path.to_path_buf())
-            .collect::<Vec<_>>();
+        let actual = index.entries().map(|e| e.path.clone()).collect::<Vec<_>>();
 
-        let expected: Vec<PathBuf> = vec!["alice.txt/nested.txt".into(), "bob.txt".into()];
+        let expected = vec![
+            WsPath::new_unchecked("alice.txt/nested.txt"),
+            WsPath::new_unchecked("bob.txt"),
+        ];
 
         assert_eq!(expected, actual);
 
@@ -379,12 +379,12 @@ mod tests {
 
         index.add(entry_fixture("nested"));
 
-        let actual = index
-            .entries()
-            .map(|e| e.path.to_path_buf())
-            .collect::<Vec<_>>();
+        let actual = index.entries().map(|e| e.path.clone()).collect::<Vec<_>>();
 
-        let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
+        let expected = vec![
+            WsPath::new_unchecked("alice.txt"),
+            WsPath::new_unchecked("nested"),
+        ];
 
         assert_eq!(expected, actual);
 
@@ -404,12 +404,12 @@ mod tests {
 
         index.add(entry_fixture("nested"));
 
-        let actual = index
-            .entries()
-            .map(|e| e.path.to_path_buf())
-            .collect::<Vec<_>>();
+        let actual = index.entries().map(|e| e.path.clone()).collect::<Vec<_>>();
 
-        let expected: Vec<PathBuf> = vec!["alice.txt".into(), "nested".into()];
+        let expected = vec![
+            WsPath::new_unchecked("alice.txt"),
+            WsPath::new_unchecked("nested"),
+        ];
 
         assert_eq!(expected, actual);
 

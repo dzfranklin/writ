@@ -3,7 +3,7 @@ use chrono::{DateTime, FixedOffset, Local};
 use lazy_static::lazy_static;
 use regex::bytes::Regex;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Author {
     name: BString,
     email: BString,

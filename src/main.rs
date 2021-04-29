@@ -25,6 +25,11 @@ pub enum Opt {
         #[structopt(long, short)]
         message: String,
     },
+    Plumb(Plumb),
+}
+
+#[derive(StructOpt, Debug, Clone)]
+pub enum Plumb {
     ShowHead,
 }
 
@@ -56,8 +61,14 @@ fn main() -> eyre::Result<()> {
             email,
             message,
         } => Repo::for_current_dir()?.commit(name, email, message)?,
-        Opt::ShowHead => Repo::for_current_dir()?.show_head()?,
+        Opt::Plumb(plumb) => plumb_main(plumb)?,
     }
 
     Ok(())
+}
+
+fn plumb_main(opt: Plumb) -> eyre::Result<()> {
+    match opt {
+        Plumb::ShowHead => Repo::for_current_dir()?.show_head(),
+    }
 }
