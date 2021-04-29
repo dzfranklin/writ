@@ -54,7 +54,7 @@ impl<O: Object> Oid<O> {
         }
     }
 
-    fn type_as_str(&self) -> &'static str {
+    fn type_as_str() -> &'static str {
         &std::str::from_utf8(O::TYPE).expect("TYPE always utf8")
     }
 }
@@ -131,14 +131,14 @@ impl<O: Object> fmt::Debug for Oid<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Oid")
             .field("bytes", &self.to_hex())
-            .field("type", &self.type_as_str())
+            .field("type", &Self::type_as_str())
             .finish()
     }
 }
 
 impl<O: Object> fmt::Display for Oid<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", &self.type_as_str(), self.to_hex())
+        write!(f, "{} {}", &Self::type_as_str(), self.to_hex())
     }
 }
 

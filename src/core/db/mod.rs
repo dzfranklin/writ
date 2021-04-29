@@ -26,7 +26,7 @@ use std::{
 use self::cache::Cache;
 use crate::core::WsPath;
 
-/// Note: Cloning clears the cache
+/// Note: Cloning doesn't keep the cache
 #[derive(Debug)]
 pub struct Db {
     path: PathBuf,
@@ -39,10 +39,6 @@ impl Db {
             path: git_dir.into().join("objects"),
             cache: Cache::new(),
         }
-    }
-
-    pub(super) fn cache<O: Object + 'static>(&mut self, oid: Oid<O>, object: O) {
-        self.cache.insert(oid, object);
     }
 
     pub fn load<O: Object>(&mut self, oid: Oid<O>) -> Result<O, LoadError<O>> {
