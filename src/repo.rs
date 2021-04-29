@@ -6,14 +6,14 @@ use std::{
 };
 
 use crate::{
-    db::{self, object, Blob, Commit, Tree},
+    db::{self, object, tree, Blob, Commit, Tree},
     index::{
         self,
         entry::{self, Entry, StatusChatty},
     },
     refs,
     ws::{self, ListFilesError, ReadFileError, StatFileError},
-    Db, FileStatus, Index, ObjectBuilder, Oid, Refs, Status, Workspace, WsPath,
+    Db, FileStatus, Index, IndexMut, ObjectBuilder, Oid, Refs, Status, Workspace, WsPath,
 };
 use bstr::BString;
 use chrono::Local;
@@ -99,12 +99,14 @@ impl Repo {
     }
 
     #[instrument(err)]
-    pub fn add<P>(&mut self, files: Vec<P>) -> Result<(), AddError>
+    pub fn add<I, P>(&mut self, files: I) -> Result<(), AddError>
     where
-        P: AsRef<Path> + fmt::Debug,
+        I: IntoIterator<Item = P> + fmt::Debug,
+        P: AsRef<Path>,
     {
         let workspace = &self.workspace;
         let db = &self.db;
+        self.index.reload()?;
         let mut index = self.index.modify()?;
 
         for file in workspace.find_files(files)? {
@@ -164,41 +166,98 @@ impl Repo {
     /// Unlike git, this lists files only. Children of untracked directories are
     /// reported instead of reporting the directory itself.
     #[instrument(err)]
-    pub fn status(&mut self) -> Result<BTreeMap<BString, FileStatus>, StatusError> {
-        let mut status = self
-            .workspace
-            .list_files()?
-            .into_iter()
-            .map(|path| {
-                let key = path.to_bstring();
-                let status = self.status_of(path)?;
-                Ok((key, status))
-            })
-            .collect::<Result<BTreeMap<_, _>, StatusError>>()?;
+    pub fn status(&mut self) -> Result<BTreeMap<WsPath, FileStatus>, StatusError> {
+        let head = if let Some(head) = self.refs.head()? {
+            let tree = self.db.load(head)?.tree;
+            self.db.load_tree_files(&WsPath::root(), tree)?
+        } else {
+            BTreeMap::new()
+        };
 
-        for entry in self.index.entries() {
-            if !status.contains_key(entry.key()) {
-                let value = FileStatus::new(entry.path.clone(), Status::Deleted);
-                status.insert(entry.key().to_owned(), value);
+        self.index.reload()?;
+        let mut index = self
+            .index
+            .modify()
+            .map_err(|e| StatusError::UpdateIndex(e.into()))?;
+
+        let work = &self.workspace;
+
+        let mut ws_statuses = BTreeMap::new();
+        let mut index_statuses = BTreeMap::new();
+
+        for path in self.workspace.list_files()? {
+            let ws_status = Self::workspace_status_of(work, &mut index, &path)?;
+            let index_status = Self::index_status_of(&index, &head, &path)?;
+            debug!(
+                "{} in workspace. ws_status: {:?}, index_status: {:?}",
+                path, ws_status, index_status
+            );
+            ws_statuses.insert(path.clone(), ws_status);
+            index_statuses.insert(path, index_status);
+        }
+
+        for entry in index.entries() {
+            if !ws_statuses.contains_key(&entry.path) {
+                debug!(
+                    "{} in index but not workspace, so ws_status: Status::Deleted",
+                    entry.path
+                );
+                ws_statuses.insert(entry.path.clone(), Status::Deleted);
             }
         }
 
-        Ok(status)
+        for (path, _file) in head {
+            if !index.is_tracked_file(&path) {
+                debug!(
+                    "{} in head but not index, so index_status: Status::Deleted",
+                    path
+                );
+                index_statuses.insert(path, Status::Deleted);
+            }
+        }
+
+        index
+            .commit()
+            .map_err(|e| StatusError::UpdateIndex(e.into()))?;
+
+        let mut statuses = BTreeMap::new();
+
+        for (path, ws_status) in ws_statuses {
+            let index_status = index_statuses.remove(&path).unwrap_or(Status::Untracked);
+            statuses.insert(
+                path.clone(),
+                FileStatus {
+                    path,
+                    workspace: ws_status,
+                    index: index_status,
+                },
+            );
+        }
+
+        for (path, index_status) in index_statuses {
+            statuses.insert(
+                path.clone(),
+                FileStatus {
+                    path,
+                    workspace: Status::Deleted,
+                    index: index_status,
+                },
+            );
+        }
+
+        Ok(statuses)
     }
 
-    pub fn status_of(&mut self, path: WsPath) -> Result<FileStatus, StatusError> {
-        let status = if let Some(entry) = self.index.entry(&path) {
-            match entry.status_chatty(&self.workspace)? {
+    pub fn workspace_status_of(
+        work: &Workspace,
+        index: &mut IndexMut,
+        path: &WsPath,
+    ) -> Result<Status, StatusError> {
+        let status = if let Some(entry) = index.entry(path) {
+            match entry.index_status_chatty(work)? {
                 StatusChatty::Unmodified => Status::Unmodified,
                 StatusChatty::UnmodifiedButNewStat(new_stat) => {
-                    let mut index = self
-                        .index
-                        .modify()
-                        .map_err(|e| StatusError::UpdateIndex(e.into()))?;
-                    index.update_stat(&path, new_stat).expect("Entry exists");
-                    index
-                        .commit()
-                        .map_err(|e| StatusError::UpdateIndex(e.into()))?;
+                    index.update_stat(path, new_stat).expect("Entry exists");
                     Status::Unmodified
                 }
                 StatusChatty::Modified => Status::Modified,
@@ -207,8 +266,32 @@ impl Repo {
         } else {
             Status::Untracked
         };
+        Ok(status)
+    }
 
-        Ok(FileStatus::new(path, status))
+    #[allow(clippy::option_if_let_else)]
+    pub fn index_status_of(
+        index: &Index,
+        head: &BTreeMap<WsPath, tree::FileNode>,
+        path: &WsPath,
+    ) -> Result<Status, StatusError> {
+        let index_entry = if let Some(index_entry) = index.entry(path) {
+            index_entry
+        } else {
+            return Ok(Status::Untracked);
+        };
+
+        let status = if let Some(head_file) = head.get(path) {
+            if head_file.mode == index_entry.mode() && head_file.oid == index_entry.oid {
+                Status::Unmodified
+            } else {
+                Status::Modified
+            }
+        } else {
+            Status::Added
+        };
+
+        Ok(status)
     }
 
     pub fn show_head(&self) -> eyre::Result<()> {
@@ -224,7 +307,7 @@ impl Repo {
         let level_prefix = " ".repeat(level * 4);
         for node in tree.direct_children() {
             match node {
-                db::tree::Node::File { name, mode, oid } => {
+                db::tree::Node::File(db::tree::FileNode { name, mode, oid }) => {
                     println!("{}{} {} ({:?})", level_prefix, oid, name, mode)
                 }
                 db::tree::Node::Tree { name, oid } => {
@@ -274,8 +357,10 @@ pub enum ForCurrentDirError {
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 pub enum AddError {
-    /// Failed to load index
-    LoadIndex(#[from] index::OpenForModificationsError),
+    /// Failed to reload index
+    ReloadIndex(#[from] index::LoadError),
+    /// Failed to open index of modifications
+    OpenIndex(#[from] index::OpenForModificationsError),
     /// Failed to find files provided in repository
     FindFiles(#[from] ws::ListFilesError),
     /// Failed to stat file
@@ -308,6 +393,14 @@ pub enum CommitError {
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
 pub enum StatusError {
+    /// Failed to reload index
+    ReloadIndex(#[from] index::LoadError),
+    /// Failed to get head oid
+    GetHeadOid(#[from] refs::ReadError),
+    /// Failed to load head commit
+    LoadHeadCommit(#[from] db::LoadError<db::Commit>),
+    /// Failed to load of tree from head
+    LoadHeadTree(#[from] db::LoadError<db::Tree>),
     /// Failed to list files
     ListFiles(#[from] ListFilesError),
     /// Failed to check if file unchanged

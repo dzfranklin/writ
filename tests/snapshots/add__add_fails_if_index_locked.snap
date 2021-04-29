@@ -4,7 +4,7 @@ expression: "repo.add(vec![\"random_name\"])"
 
 ---
 Err(
-    LoadIndex(
+    OpenIndex(
         Locking(
             Contested(
                 Os {

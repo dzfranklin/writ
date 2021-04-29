@@ -17,15 +17,15 @@ pub struct Tree {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Node {
-    File {
-        oid: Oid<Blob>,
-        name: BString,
-        mode: stat::Mode,
-    },
-    Tree {
-        name: BString,
-        oid: Oid<Tree>,
-    },
+    File(FileNode),
+    Tree { name: BString, oid: Oid<Tree> },
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FileNode {
+    pub oid: Oid<Blob>,
+    pub name: BString,
+    pub mode: stat::Mode,
 }
 
 impl Tree {
@@ -33,6 +33,10 @@ impl Tree {
 
     pub fn direct_children(&self) -> impl Iterator<Item = &Node> {
         self.nodes.values()
+    }
+
+    pub fn direct_child(&self, name: &BStr) -> Option<&Node> {
+        self.nodes.get(name)
     }
 }
 
@@ -64,14 +68,14 @@ impl Object for Tree {
 impl Node {
     pub fn untyped_oid(&self) -> UntypedOid {
         match self {
-            Self::File { oid, .. } => oid.erase_type(),
-            Self::Tree { oid, .. } => oid.erase_type(),
+            Self::File(FileNode { oid, .. }) => oid.into_untyped(),
+            Self::Tree { oid, .. } => oid.into_untyped(),
         }
     }
 
     pub fn name(&self) -> &BStr {
         match self {
-            Node::File { name, .. } | Node::Tree { name, .. } => name.as_bstr(),
+            Node::File(FileNode { name, .. }) | Node::Tree { name, .. } => name.as_bstr(),
         }
     }
 
@@ -98,11 +102,11 @@ impl Node {
             }
         } else {
             let mode = stat::Mode::from_base8(mode.as_bstr());
-            Self::File {
+            Self::File(FileNode {
                 oid: oid.to_typed(),
                 mode,
                 name,
-            }
+            })
         };
 
         Ok(Some(entry))
@@ -173,11 +177,11 @@ impl Builder {
         for (name, entry) in self.trees[subroot].take().expect("Not already serialized") {
             let (oid, mode) = match entry {
                 SerializeNode::Entry { oid, mode } => {
-                    (oid.erase_type(), mode.as_base8().as_bytes())
+                    (oid.into_untyped(), mode.as_base8().as_bytes())
                 }
                 SerializeNode::Tree(tree) => {
                     let oid = self.store_subroot(db, tree)?;
-                    (oid.erase_type(), Tree::MODE)
+                    (oid.into_untyped(), Tree::MODE)
                 }
             };
 

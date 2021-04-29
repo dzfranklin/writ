@@ -4,6 +4,7 @@ pub use entry::Entry;
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::TryInto,
+    fmt,
     fs::File,
     io::{self, Read, Write},
     ops::Deref,
@@ -18,7 +19,7 @@ use tracing::debug;
 
 type EntriesMap = BTreeMap<BString, Entry>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Index {
     entries: EntriesMap,
     path: PathBuf,
@@ -103,7 +104,7 @@ impl Index {
         IndexMut::new(self)
     }
 
-    pub fn is_tracked(&self, path: &WsPath) -> bool {
+    pub fn is_tracked_file(&self, path: &WsPath) -> bool {
         self.entries.contains_key(path.as_bstr())
     }
 
@@ -113,6 +114,14 @@ impl Index {
 
     fn file_path(git_dir: impl AsRef<Path>) -> PathBuf {
         git_dir.as_ref().join("index")
+    }
+}
+
+impl fmt::Debug for Index {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Index")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
     }
 }
 

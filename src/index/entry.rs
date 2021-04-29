@@ -62,7 +62,7 @@ impl Entry {
     }
 
     #[instrument(err)]
-    pub(crate) fn status_chatty(
+    pub(crate) fn index_status_chatty(
         &self,
         workspace: &Workspace,
     ) -> Result<StatusChatty, IsUnchangedError> {

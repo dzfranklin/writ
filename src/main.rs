@@ -25,6 +25,7 @@ pub enum Opt {
         #[structopt(long, short)]
         message: String,
     },
+    Status,
     Plumb(Plumb),
 }
 
@@ -61,6 +62,7 @@ fn main() -> eyre::Result<()> {
             email,
             message,
         } => Repo::for_current_dir()?.commit(name, email, message)?,
+        Opt::Status => eprintln!("{:#?}", Repo::for_current_dir()?.status()?),
         Opt::Plumb(plumb) => plumb_main(plumb)?,
     }
 

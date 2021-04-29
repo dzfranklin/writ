@@ -1,5 +1,6 @@
 pub mod author;
 pub mod blob;
+pub mod cache;
 pub mod commit;
 pub mod object;
 pub mod tree;
@@ -15,11 +16,14 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use tempfile::NamedTempFile;
 
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     io::{self, BufRead, BufReader, BufWriter, ErrorKind, Read, Write},
     num::ParseIntError,
     path::PathBuf,
 };
+
+use crate::WsPath;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -36,6 +40,60 @@ impl Db {
     pub fn load<O: Object>(&self, oid: Oid<O>) -> Result<O, LoadError<O>> {
         let (len, bytes) = self.load_bytes(O::TYPE, &oid)?;
         O::deserialize(oid, len, bytes).map_err(|e| LoadError::Deserialize(oid, e))
+    }
+
+    pub fn load_tree_file(
+        &self,
+        mut tree: Oid<Tree>,
+        path: &WsPath,
+    ) -> Result<Option<tree::FileNode>, LoadError<Tree>> {
+        for parent in path.parents() {
+            if let Some(tree::Node::Tree { oid: next_tree, .. }) =
+                self.load(tree)?.direct_child(parent.file_name())
+            {
+                tree = *next_tree;
+            } else {
+                return Ok(None);
+            }
+        }
+
+        if let Some(tree::Node::File(file)) = self.load(tree)?.direct_child(path.file_name()) {
+            Ok(Some(file.clone()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn load_tree_files(
+        &self,
+        root: &WsPath,
+        tree: Oid<Tree>,
+    ) -> Result<BTreeMap<WsPath, tree::FileNode>, LoadError<Tree>> {
+        let mut files = BTreeMap::new();
+        self.load_all_tree_files_into(&mut files, root, tree)?;
+        Ok(files)
+    }
+
+    fn load_all_tree_files_into(
+        &self,
+        files: &mut BTreeMap<WsPath, tree::FileNode>,
+        root: &WsPath,
+        tree: Oid<Tree>,
+    ) -> Result<(), LoadError<Tree>> {
+        let tree = self.load(tree)?;
+        for child in tree.direct_children() {
+            match child {
+                tree::Node::File(file) => {
+                    let path = root.join_bytes(child.name());
+                    files.insert(path, file.clone());
+                }
+                tree::Node::Tree { oid, .. } => {
+                    let next_root = root.join_bytes(child.name());
+                    self.load_all_tree_files_into(files, &next_root, *oid)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn load_bytes<O: Object>(

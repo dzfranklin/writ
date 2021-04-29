@@ -3,7 +3,8 @@
     with_options,
     associated_type_defaults,
     map_first_last,
-    const_fn
+    const_fn,
+    debug_non_exhaustive
 )]
 // TODO: Warn clippy::cargos
 #![warn(clippy::all, clippy::pedantic)]

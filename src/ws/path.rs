@@ -190,6 +190,12 @@ impl PartialEq<str> for WsPath {
     }
 }
 
+impl PartialEq<&str> for WsPath {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_bstr().eq(other.as_bytes().as_bstr())
+    }
+}
+
 impl PartialEq<WsPath> for str {
     fn eq(&self, other: &WsPath) -> bool {
         self.as_bytes().as_bstr().eq(other.as_bstr())

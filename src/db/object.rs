@@ -8,7 +8,7 @@ pub struct Oid<O: Object> {
     _ty: PhantomData<O>,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct UntypedOid([u8; OID_SIZE]);
 
 pub const OID_SIZE: usize = 20;
@@ -39,8 +39,12 @@ impl<O: Object> Oid<O> {
         Self::from_untyped(inner)
     }
 
-    pub fn erase_type(self) -> UntypedOid {
+    pub fn into_untyped(self) -> UntypedOid {
         self.inner
+    }
+
+    pub fn as_untyped(&self) -> &UntypedOid {
+        &self.inner
     }
 
     pub const fn from_untyped(oid: UntypedOid) -> Self {
@@ -116,6 +120,12 @@ impl<O: Object> Clone for Oid<O> {
 }
 
 impl<O: Object> Copy for Oid<O> {}
+
+impl<O: Object> std::hash::Hash for Oid<O> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
+}
 
 impl<O: Object> fmt::Debug for Oid<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

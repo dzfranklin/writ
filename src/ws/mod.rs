@@ -28,9 +28,10 @@ impl Workspace {
     }
 
     #[instrument(err)]
-    pub fn find_files<P>(&self, paths: Vec<P>) -> Result<Vec<WsPath>, ListFilesError>
+    pub fn find_files<I, P>(&self, paths: I) -> Result<Vec<WsPath>, ListFilesError>
     where
-        P: AsRef<Path> + fmt::Debug,
+        I: IntoIterator<Item = P> + fmt::Debug,
+        P: AsRef<Path>,
     {
         let mut files = Vec::new();
 
@@ -73,8 +74,6 @@ impl Workspace {
         }
 
         if meta.is_dir() {
-            debug!("Listing directory {:?}", rel_path);
-
             let children = abs_path
                 .read_dir()
                 .map_err(|e| ListFilesError::ReadDir(abs_path.to_owned(), e))?
@@ -87,8 +86,6 @@ impl Workspace {
 
             files.extend(self.find_files(children)?);
         } else if meta.is_file() {
-            debug!("Listed file {:?}", rel_path);
-
             files.push(WsPath::new_unchecked(rel_path));
         } else {
             return Err(ListFilesError::InvalidFileType(rel_path.into()));
