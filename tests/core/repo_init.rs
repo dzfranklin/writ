@@ -1,7 +1,4 @@
-mod support;
-#[allow(unused)]
-use support::assert_eq;
-use support::*;
+use test_support::*;
 
 #[test]
 fn can_init() -> Result {

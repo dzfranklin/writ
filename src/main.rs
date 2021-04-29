@@ -6,7 +6,7 @@ use std::{
 
 use structopt::StructOpt;
 use tracing::debug;
-use writ::*;
+use writ::core::*;
 
 #[derive(StructOpt, Debug, Clone)]
 pub enum Opt {

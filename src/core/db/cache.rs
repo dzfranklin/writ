@@ -3,7 +3,7 @@ use std::{any::Any, fmt};
 use lru::LruCache;
 use tracing::warn;
 
-use crate::{Object, Oid};
+use crate::core::{Object, Oid};
 
 use super::UntypedOid;
 

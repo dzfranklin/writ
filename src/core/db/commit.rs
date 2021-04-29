@@ -7,7 +7,7 @@ use bstr::{BString, ByteSlice};
 use tracing::warn;
 
 use super::{author, object::ParseOidError, Author, Tree};
-use crate::{db, Db, Object, ObjectBuilder, Oid};
+use crate::core::{db, Db, Object, ObjectBuilder, Oid};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Commit {

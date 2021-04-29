@@ -5,7 +5,7 @@ use std::{
 
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::{db, stat, Db, Object, Oid, WsPath};
+use crate::core::{db, stat, Db, Object, Oid, WsPath};
 
 use super::{object::OID_SIZE, Blob, ObjectBuilder, UntypedOid};
 
@@ -224,7 +224,7 @@ pub struct DeserializeError(#[from] io::Error);
 mod test {
     use insta::assert_debug_snapshot;
 
-    use crate::stat::Mode;
+    use crate::core::stat::Mode;
 
     use super::*;
 

@@ -3,7 +3,7 @@ use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use std::{convert::TryInto, fmt, io};
 use tracing::{debug, instrument};
 
-use crate::{
+use crate::core::{
     db::{object::OID_SIZE, Blob},
     stat::{self, Mode},
     ws::{ReadFileError, StatFileError},

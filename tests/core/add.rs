@@ -1,8 +1,5 @@
-#![feature(path_try_exists)]
-
-mod support;
-use support::assert_eq;
-use support::*;
+use test_support::assert_eq;
+use test_support::*;
 
 #[test]
 fn can_basic_add() -> Result {

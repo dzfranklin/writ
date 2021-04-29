@@ -2,7 +2,7 @@ use std::io::{self, BufRead};
 
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::{
+use crate::core::{
     db::{self, Db},
     Object, ObjectBuilder, Oid,
 };

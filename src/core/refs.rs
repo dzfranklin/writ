@@ -1,6 +1,6 @@
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::{
+use crate::core::{
     db::{object::ParseOidError, Commit},
     locked_file, LockedFile, Oid,
 };

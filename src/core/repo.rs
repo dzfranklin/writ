@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
+use crate::core::{
     db::{self, object, tree, Blob, Commit, Tree},
     index::{
         self,

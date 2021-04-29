@@ -24,7 +24,7 @@ use std::{
 };
 
 use self::cache::Cache;
-use crate::WsPath;
+use crate::core::WsPath;
 
 /// Note: Cloning clears the cache
 #[derive(Debug)]

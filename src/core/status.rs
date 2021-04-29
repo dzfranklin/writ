@@ -1,4 +1,4 @@
-use crate::WsPath;
+use crate::core::WsPath;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(clippy::module_name_repetitions)]

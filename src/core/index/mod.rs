@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{locked_file, LockedFile, Stat, WithDigest, WsPath};
+use crate::core::{locked_file, LockedFile, Stat, WithDigest, WsPath};
 use bstr::BString;
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use ring::digest::SHA1_FOR_LEGACY_USE_ONLY as SHA1;
@@ -308,7 +308,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::{test_support::init, Oid, WsPath};
+    use crate::{
+        core::{Oid, WsPath},
+        test_support::init,
+    };
     use insta::assert_debug_snapshot;
     use pretty_assertions::assert_eq;
 

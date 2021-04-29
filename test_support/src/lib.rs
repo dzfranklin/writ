@@ -10,7 +10,7 @@ pub use pretty_assertions::assert_eq;
 pub use std::fs;
 pub use std::os::unix::prelude::MetadataExt;
 pub use tempfile::{tempdir, TempDir};
-pub use writ::Repo;
+pub use writ::core::Repo;
 
 static INIT: Once = Once::new();
 

@@ -1,7 +1,7 @@
 pub mod path;
 pub use path::WsPath;
 
-use crate::Stat;
+use crate::core::Stat;
 
 use bstr::BString;
 use std::{
@@ -9,7 +9,7 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 #[derive(Debug, Clone)]
 pub struct Workspace {

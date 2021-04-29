@@ -1,13 +1,10 @@
-#![feature(map_into_keys_values)]
-
-mod support;
 use std::{thread, time::Duration};
 
 use cmd_lib::run_cmd;
-use support::assert_eq;
-use support::*;
+use test_support::assert_eq;
+use test_support::*;
 
-use writ::{FileStatus, Status};
+use writ::core::{FileStatus, Status};
 
 #[test]
 fn lists_untracked() -> Result {

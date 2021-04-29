@@ -7,7 +7,7 @@ use std::{
 
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::Workspace;
+use crate::core::Workspace;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(clippy::module_name_repetitions)]

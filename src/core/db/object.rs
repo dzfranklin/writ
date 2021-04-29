@@ -1,6 +1,6 @@
 use std::{convert::TryInto, fmt, io::BufRead, marker::PhantomData};
 
-use crate::{db, Db};
+use crate::core::{db, Db};
 use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY as SHA1};
 
 pub struct Oid<O: Object> {
