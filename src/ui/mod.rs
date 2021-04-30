@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use eyre::eyre;
 use structopt::StructOpt;
 use tracing::debug;
 
@@ -68,6 +69,11 @@ impl Ui {
         P: AsRef<Path>,
     {
         let added = self.repo.add(files)?;
+
+        if added.is_empty() {
+            return Err(eyre!("No files match paths specified"));
+        }
+
         let added = added
             .iter()
             .map(|p| p.as_bstr().to_str_lossy())
