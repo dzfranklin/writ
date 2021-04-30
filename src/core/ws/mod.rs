@@ -6,7 +6,6 @@ use crate::core::Stat;
 use bstr::BString;
 use std::{
     fmt, fs, io,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
 use tracing::instrument;
@@ -17,8 +16,6 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    const IGNORE: &'static [&'static [u8]] = &[b".git"];
-
     pub fn new<P: Into<PathBuf>>(path: P) -> Self {
         Self { path: path.into() }
     }
@@ -95,9 +92,7 @@ impl Workspace {
     }
 
     fn is_ignored(rel_path: &Path) -> bool {
-        Self::IGNORE
-            .iter()
-            .any(|&ignored| rel_path.as_os_str().as_bytes() == ignored)
+        rel_path.starts_with(".git")
     }
 
     pub fn read_file(&self, path: &WsPath) -> Result<BString, ReadFileError> {
