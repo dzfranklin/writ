@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use console::style;
 use eyre::eyre;
 use structopt::StructOpt;
 use tracing::debug;
@@ -10,10 +11,6 @@ use tracing::debug;
 use bstr::ByteSlice;
 
 use crate::core;
-
-pub struct Ui {
-    repo: core::Repo,
-}
 
 #[derive(StructOpt, Debug, Clone)]
 pub enum Opt {
@@ -33,12 +30,24 @@ pub enum Opt {
         message: String,
     },
     Status,
-    Plumb(Plumb),
+    Plumb(PlumbOpt),
 }
 
 #[derive(StructOpt, Debug, Clone)]
-pub enum Plumb {
+pub enum PlumbOpt {
     ShowHead,
+}
+
+pub struct Ui {
+    repo: core::Repo,
+}
+
+#[macro_export]
+macro_rules! println_style {
+    ($fmt:literal.$($sty:tt)+) => {{
+        let msg = style(format!($fmt)).$($sty)+;
+        println!("{}", msg);
+    }};
 }
 
 impl Ui {
@@ -79,7 +88,7 @@ impl Ui {
             .map(|p| p.as_bstr().to_str_lossy())
             .collect::<Vec<_>>()
             .join(", ");
-        println!("Added file(s): {added}");
+        println_style!("Added file(s): {added}".green());
         Ok(())
     }
 
@@ -90,7 +99,7 @@ impl Ui {
         msg: impl Into<String> + fmt::Debug,
     ) -> eyre::Result<()> {
         self.repo.commit(name, email, msg)?;
-        println!("Committed");
+        println_style!("Committed".green().bold());
         Ok(())
     }
 
@@ -120,7 +129,8 @@ impl Ui {
         if !to_commit.is_empty() {
             println!("Changes to be committed:");
             for (path, status) in to_commit {
-                println!("    {status}: {path}", status = status.name());
+                let status = style(status.name());
+                println_style!("    {status}: {path}".green());
             }
             println!();
         }
@@ -128,7 +138,8 @@ impl Ui {
         if !not_staged.is_empty() {
             println!("Changes not staged for commit:");
             for (path, status) in not_staged {
-                println!("    {status}: {path}", status = status.name());
+                let status = status.name();
+                println_style!("    {status}: {path}".green());
             }
             println!();
         }
@@ -136,7 +147,7 @@ impl Ui {
         if !untracked.is_empty() {
             println!("Untracked files:");
             for path in untracked {
-                println!("{path}");
+                println_style!("    {path}".red());
             }
             println!();
         }
@@ -198,8 +209,9 @@ pub fn run_command(opt: Opt) -> eyre::Result<()> {
     Ok(())
 }
 
-fn run_plumb_command(opt: Plumb) -> eyre::Result<()> {
+#[allow(clippy::needless_pass_by_value)]
+fn run_plumb_command(opt: PlumbOpt) -> eyre::Result<()> {
     match opt {
-        Plumb::ShowHead => Ui::for_current_dir()?.plumb_show_head(),
+        PlumbOpt::ShowHead => Ui::for_current_dir()?.plumb_show_head(),
     }
 }
