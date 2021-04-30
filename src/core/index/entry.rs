@@ -1,4 +1,4 @@
-use bstr::{BStr, ByteSlice};
+use bstr::{BStr, BString, ByteSlice};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use std::{convert::TryInto, fmt, io};
 use tracing::{debug, instrument};
@@ -177,7 +177,7 @@ impl Entry {
         let flags = reader.read_u16::<NetworkEndian>()?; // offset 62
         let flags = Flags::from_u16(flags);
 
-        let mut path = Vec::new();
+        let mut path = BString::from(Vec::new());
         loop {
             let byte = reader.read_u8()?;
             if byte == b'\0' {
@@ -205,7 +205,11 @@ impl Entry {
     fn padding_size(path: &[u8]) -> usize {
         let len = Self::PATH_OFFSET + path.len();
         // See <https://stackoverflow.com/a/11642218>
-        (Self::BLOCK_SIZE - (len % Self::BLOCK_SIZE)) % Self::BLOCK_SIZE
+        let mut padding = (Self::BLOCK_SIZE - (len % Self::BLOCK_SIZE)) % Self::BLOCK_SIZE;
+        if padding == 0 {
+            padding = Self::BLOCK_SIZE;
+        }
+        padding
     }
 }
 

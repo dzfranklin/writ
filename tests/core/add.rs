@@ -228,3 +228,13 @@ fn can_add_multiple_times() -> Result {
 
     Ok(())
 }
+
+#[test]
+fn can_add_file_where_name_is_multiple_of_padding_size() -> Result {
+    init();
+    let (ws, mut repo) = repo_fixture()?;
+    write_to(ws.path().join(".github/workflows/main.yml"), "")?;
+    repo.add(vec![".github/workflows/main.yml"])?;
+    repo.status()?;
+    Ok(())
+}
