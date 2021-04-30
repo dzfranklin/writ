@@ -1,5 +1,5 @@
 ---
-source: src/index.rs
+source: src/core/index/mod.rs
 expression: actual
 
 ---

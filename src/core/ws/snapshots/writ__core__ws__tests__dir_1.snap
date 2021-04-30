@@ -1,15 +1,9 @@
 ---
-source: src/ws/mod.rs
+source: src/core/ws/mod.rs
 expression: files
 
 ---
 [
-    WsPath(
-        "a",
-    ),
-    WsPath(
-        "b",
-    ),
     WsPath(
         "dir_1/c",
     ),

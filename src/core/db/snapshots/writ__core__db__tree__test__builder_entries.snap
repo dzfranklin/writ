@@ -1,0 +1,62 @@
+---
+source: src/core/db/tree.rs
+expression: builder
+
+---
+Builder {
+    trees: [
+        Some(
+            {
+                "doubly_nested": Tree(
+                    2,
+                ),
+                "singly_nested": Tree(
+                    1,
+                ),
+                "top_level": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+                "top_level2": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "child": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+        Some(
+            {
+                "inner": Tree(
+                    3,
+                ),
+            },
+        ),
+        Some(
+            {
+                "child": Entry {
+                    oid: Oid {
+                        bytes: "0000000000000000000000000000000000000000",
+                        type: "blob",
+                    },
+                    mode: Regular,
+                },
+            },
+        ),
+    ],
+}

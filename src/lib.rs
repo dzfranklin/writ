@@ -16,6 +16,7 @@
 )]
 
 pub mod core;
+pub mod ui;
 
 #[cfg(test)]
 pub use test_support;

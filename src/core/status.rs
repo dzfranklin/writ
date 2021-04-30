@@ -16,3 +16,15 @@ pub enum Status {
     Deleted,
     Added,
 }
+
+impl Status {
+    pub fn name(self) -> &'static str {
+        match self {
+            Status::Untracked => "untracked",
+            Status::Modified => "modified",
+            Status::Unmodified => "unmodified",
+            Status::Deleted => "deleted",
+            Status::Added => "added",
+        }
+    }
+}

@@ -13,7 +13,7 @@ use crate::core::{
     },
     refs,
     ws::{self, ListFilesError, ReadFileError, StatFileError},
-    Db, FileStatus, Index, IndexMut, ObjectBuilder, Oid, Refs, Status, Workspace, WsPath,
+    Db, FileStatus, Index, IndexMut, ObjectBuilder, Refs, Status, Workspace, WsPath,
 };
 use chrono::Local;
 use tracing::{debug, instrument};
@@ -98,7 +98,7 @@ impl Repo {
     }
 
     #[instrument(err)]
-    pub fn add<I, P>(&mut self, files: I) -> Result<(), AddError>
+    pub fn add<I, P>(&mut self, files: I) -> Result<Vec<WsPath>, AddError>
     where
         I: IntoIterator<Item = P> + fmt::Debug,
         P: AsRef<Path>,
@@ -108,20 +108,22 @@ impl Repo {
         self.index.reload()?;
         let mut index = self.index.modify()?;
 
+        let mut added = Vec::new();
         for file in workspace.find_files(files)? {
             let data = workspace.read_file(&file)?;
             let stat = workspace.stat(&file)?;
 
             let oid = db::blob::Builder::new(data).store(&db)?;
-            let entry = Entry::new(file, oid, stat);
+            let entry = Entry::new(file.clone(), oid, stat);
 
             debug!("Adding {:?}", entry);
+            added.push(file);
             index.add(entry);
         }
 
         index.commit()?;
 
-        Ok(())
+        Ok(added)
     }
 
     #[instrument(err)]
@@ -282,31 +284,6 @@ impl Repo {
         };
 
         Ok(status)
-    }
-
-    pub fn show_head(&mut self) -> eyre::Result<()> {
-        let head = self.refs.head()?.ok_or_else(|| eyre::eyre!("No HEAD"))?;
-        let commit = self.db.load::<Commit>(head)?;
-        eprintln!("HEAD: {}\n", head);
-        self.print_tree(commit.tree, 0)?;
-        Ok(())
-    }
-
-    fn print_tree(&mut self, tree: Oid<Tree>, level: usize) -> eyre::Result<()> {
-        let tree = self.db.load::<Tree>(tree)?;
-        let level_prefix = " ".repeat(level * 4);
-        for node in tree.direct_children() {
-            match node {
-                db::tree::Node::File(db::tree::FileNode { name, mode, oid }) => {
-                    println!("{}{} {} ({:?})", level_prefix, oid, name, mode)
-                }
-                db::tree::Node::Tree { name, oid } => {
-                    println!("{}{} {}/", level_prefix, oid, name);
-                    self.print_tree(*oid, level + 1)?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 

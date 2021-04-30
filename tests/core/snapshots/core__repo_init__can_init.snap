@@ -1,0 +1,9 @@
+---
+source: tests/core/repo_init.rs
+expression: "all_entries(dir.path().join(\".git\"))?"
+
+---
+[
+    "objects",
+    "refs",
+]

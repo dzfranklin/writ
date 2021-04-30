@@ -1,0 +1,17 @@
+---
+source: tests/core/add.rs
+expression: "repo.add(vec![\"nonexistent\"])"
+
+---
+Err(
+    FindFiles(
+        Canonicalize(
+            "nonexistent",
+            Os {
+                code: 2,
+                kind: NotFound,
+                message: "No such file or directory",
+            },
+        ),
+    ),
+)
